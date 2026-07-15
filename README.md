@@ -1,6 +1,6 @@
-# CineScope
+# Fedora Movies
 
-CineScope is a polished movie and TV discovery demo built with React, TypeScript, Vite, Tailwind CSS, React Router, Lucide icons, and the TMDB API. It displays real metadata, posters, trailers, ratings, cast information, similar titles, and legal watch-provider availability for South Africa.
+Fedora Movies is a polished movie and TV discovery demo built with React, TypeScript, Vite, Tailwind CSS, React Router, Lucide icons, and the TMDB API. It displays real metadata, posters, trailers, ratings, cast information, similar titles, and legal watch-provider availability for South Africa.
 
 It does **not** stream, host, download, scrape, sell, or link to pirated media. Provider links lead to TMDB's legal availability page.
 
@@ -64,7 +64,7 @@ The production output is written to `dist/`. When deploying as a static single-p
 
 ## Deploy to Cloudflare
 
-CineScope is a static SPA, so it deploys to Cloudflare Workers static assets with no server code. The repo ships a `wrangler.jsonc` that serves `dist/` and handles SPA routing, so `npx wrangler deploy` works with no interactive setup.
+Fedora Movies is a static SPA, so it deploys to Cloudflare Workers static assets with no server code. The repo ships a `wrangler.jsonc` that serves `dist/` and handles SPA routing, so `npx wrangler deploy` works with no interactive setup.
 
 1. Connect the repository to a Cloudflare Workers project (Workers Builds), or deploy from your machine with `npx wrangler deploy` after a local `npm run build`.
 2. Build settings (Workers Builds detects these automatically):
