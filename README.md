@@ -62,24 +62,24 @@ npm run preview
 
 The production output is written to `dist/`. When deploying as a static single-page application, configure the host to rewrite unknown paths to `index.html` so detail and search URLs can be refreshed directly.
 
-## Deploy to Cloudflare Pages
+## Deploy to Cloudflare
 
-CineScope is a static SPA, so it deploys to Cloudflare Pages with no server code.
+CineScope is a static SPA, so it deploys to Cloudflare Workers static assets with no server code. The repo ships a `wrangler.jsonc` that serves `dist/` and handles SPA routing, so `npx wrangler deploy` works with no interactive setup.
 
-1. Push the repository to GitHub/GitLab and create a Cloudflare Pages project connected to it (or run `npx wrangler pages deploy dist` after a local build).
-2. Build settings:
-   - **Framework preset:** None / Vite
+1. Connect the repository to a Cloudflare Workers project (Workers Builds), or deploy from your machine with `npx wrangler deploy` after a local `npm run build`.
+2. Build settings (Workers Builds detects these automatically):
    - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
-3. Node version: the repo pins Node via `.node-version` (`22.12.0`), which Cloudflare's build image honours automatically.
-4. Add the build-time environment variable in **Settings → Environment variables** (Production and Preview):
+   - **Deploy command:** `npx wrangler deploy`
+   - **Output directory:** `dist` (declared as `assets.directory` in `wrangler.jsonc`)
+3. Node version: the repo pins Node via `.node-version` (`22.22.0`), which satisfies the engine requirements of `react-router` and ESLint. Cloudflare's build image honours it automatically.
+4. Add the build-time environment variable in the project's **Settings → Variables** (Production and Preview):
 
    ```env
    VITE_TMDB_ACCESS_TOKEN=your_tmdb_access_token
    ```
 
    Vite inlines `VITE_*` variables at build time, so this must be set before the build runs. Without it the app builds successfully and shows the in-app setup screen.
-5. Client-side routing works automatically. Because the project has no top-level `404.html`, Cloudflare Pages serves the SPA shell for unmatched paths, so deep links such as `/movies` or `/movie/123` resolve correctly on refresh — no `_redirects` file is needed.
+5. Client-side routing works because `wrangler.jsonc` sets `assets.not_found_handling` to `single-page-application`, so deep links such as `/movies` or `/movie/123` serve the SPA shell and resolve correctly on refresh.
 
 ## Project structure
 
