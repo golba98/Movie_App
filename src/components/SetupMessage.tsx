@@ -45,10 +45,10 @@ export function SetupMessage() {
             Setup required
           </p>
           <h1 className="mt-4 text-2xl font-semibold leading-snug text-[#f5f5f5] sm:text-3xl">
-            Connect CineScope to TMDB
+            Connect Fedora Movies to TMDB
           </h1>
           <p className="mt-4 max-w-md text-sm leading-7 text-[#999999]">
-            CineScope reads movie and TV data from The Movie Database. To load it, add a TMDB
+            Fedora Movies reads movie and TV data from The Movie Database. To load it, add a TMDB
             API Read Access Token to a local environment file and restart the development server.
           </p>
           <a

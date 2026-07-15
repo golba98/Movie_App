@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-CineScope is a React 19, TypeScript, and Vite single-page application. Application code lives in `src/`: route-level views are in `src/pages/`, reusable UI in `src/components/`, TMDB requests in `src/api/`, shared state and request logic in `src/hooks/`, data contracts in `src/types/`, and formatting or normalization helpers in `src/utils/`. Global styling is in `src/index.css`. Static files belong in `public/`; production output is generated in `dist/` and should not be edited. Playwright end-to-end tests live in `tests/`.
+Fedora Movies is a React 19, TypeScript, and Vite single-page application. Application code lives in `src/`: route-level views are in `src/pages/`, reusable UI in `src/components/`, TMDB requests in `src/api/`, shared state and request logic in `src/hooks/`, data contracts in `src/types/`, and formatting or normalization helpers in `src/utils/`. Global styling is in `src/index.css`. Static files belong in `public/`; production output is generated in `dist/` and should not be edited. Playwright end-to-end tests live in `tests/`.
 
 ## Build, Test, and Development Commands
 

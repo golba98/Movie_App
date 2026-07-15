@@ -5,9 +5,9 @@ export function Logo() {
     <Link
       to="/"
       className="inline-flex items-center rounded text-[15px] font-semibold tracking-tight text-[#f5f5f5] transition-colors hover:text-white"
-      aria-label="CineScope home"
+      aria-label="Fedora Movies home"
     >
-      CineScope
+      Fedora Movies
     </Link>
   )
 }
