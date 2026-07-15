@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "playwright test",
     "test:e2e": "playwright test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && npx wrangler deploy"
   },
   "dependencies": {
     "lucide-react": "^1.24.0",
