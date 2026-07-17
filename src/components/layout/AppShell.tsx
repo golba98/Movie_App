@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from 'react-router'
+import { Outlet, useLocation, useNavigationType } from 'react-router'
 import { useEffect } from 'react'
 import { Footer } from './Footer'
 import { Header } from './Header'
@@ -7,10 +7,14 @@ import { MobileNavigation } from './MobileNavigation'
 
 export function AppShell() {
   const location = useLocation()
+  const navigationType = useNavigationType()
 
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' })
-  }, [location.pathname])
+    const isDetailsRoute = location.pathname.startsWith('/movie/') || location.pathname.startsWith('/tv/')
+    if (!isDetailsRoute && navigationType !== 'POP') {
+      window.scrollTo({ top: 0, behavior: 'instant' })
+    }
+  }, [location.pathname, navigationType])
 
   return (
     <div className="flex min-h-dvh min-w-0 flex-col overflow-x-hidden bg-[#070709]">

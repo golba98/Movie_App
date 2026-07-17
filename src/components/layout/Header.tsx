@@ -1,5 +1,5 @@
-import { LogOut, Shield } from 'lucide-react'
-import { Link, NavLink } from 'react-router'
+import { LogOut } from 'lucide-react'
+import { NavLink } from 'react-router'
 import { useAuth } from '../../hooks/useAuth'
 import { Logo } from './Logo'
 
@@ -37,7 +37,6 @@ export function Header() {
           ))}
         </nav>
         <div className="flex items-center gap-2">
-          <Link to="/admin" aria-label="Open administrator console" className="grid size-11 place-items-center rounded-full text-zinc-500 transition hover:bg-white/8 hover:text-white"><Shield size={17} aria-hidden="true" /></Link>
           <span className="max-w-36 truncate text-sm text-zinc-300">{account?.displayName}</span>
           <button type="button" onClick={() => void logout()} aria-label="Sign out" className="grid size-11 place-items-center rounded-full text-zinc-500 transition hover:bg-white/8 hover:text-white"><LogOut size={17} aria-hidden="true" /></button>
         </div>

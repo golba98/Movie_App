@@ -1,5 +1,5 @@
 import { Info, Play, Star } from 'lucide-react'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import type { MediaItem, Video } from '../../types/tmdb'
 import { backdropUrl } from '../../utils/images'
 import { formatRating, mediaPath } from '../../utils/media'
@@ -14,6 +14,7 @@ export function Hero({
   onWatchTrailer: () => void
 }) {
   const backdrop = backdropUrl(item.backdropPath)
+  const location = useLocation()
 
   return (
     <section
@@ -56,6 +57,7 @@ export function Hero({
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               to={mediaPath(item)}
+              state={{ backgroundLocation: location }}
               className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-white px-5 font-black text-zinc-950 shadow-lg transition hover:bg-zinc-200"
             >
               <Info size={19} aria-hidden="true" />

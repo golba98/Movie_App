@@ -1,5 +1,5 @@
 import { Heart, Star } from 'lucide-react'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { useFavourites } from '../../hooks/useFavourites'
 import type { MediaItem } from '../../types/tmdb'
 import { formatRating, mediaPath } from '../../utils/media'
@@ -8,12 +8,14 @@ import { PosterImage } from './PosterImage'
 export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolean }) {
   const { isFavourite, toggleFavourite } = useFavourites()
   const favourite = isFavourite(item)
+  const location = useLocation()
 
   return (
     <article className={`group min-w-0 ${row ? 'w-[148px] shrink-0 sm:w-[168px] lg:w-[184px]' : ''}`}>
       <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-zinc-900 shadow-lg shadow-black/20 ring-1 ring-white/8 transition duration-300 group-hover:-translate-y-1 group-hover:ring-white/20 group-focus-within:ring-brand-400">
         <Link
           to={mediaPath(item)}
+          state={{ backgroundLocation: location }}
           aria-label={`View details for ${item.title}`}
           className="absolute inset-0 z-10 rounded-2xl"
         >
@@ -41,6 +43,7 @@ export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolea
       <div className="mt-3 min-w-0">
         <Link
           to={mediaPath(item)}
+          state={{ backgroundLocation: location }}
           className="line-clamp-2 rounded text-sm font-bold leading-5 text-zinc-100 transition hover:text-brand-400"
         >
           {item.title}

@@ -11,7 +11,7 @@ import {
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { ApiClientError, apiRequest } from '../../api/client'
-import { AdminMediaSourceCatalog } from '../../components/admin/AdminMediaSourceCatalog'
+import { AdminMediaSourceCatalog, AdminSearchProvidersCatalog } from '../../components/admin/AdminMediaSourceCatalog'
 import { AuthError, AuthField, AuthFieldGroup, AuthLayout, AuthSubmitButton } from '../../components/auth/AuthLayout'
 import { Logo } from '../../components/layout/Logo'
 import type { AuditEvent, ViewerAccount } from '../../types/account'
@@ -312,6 +312,8 @@ export function AdminPage() {
         {(error || notice) && <div className="mt-6" aria-live="polite">{error ? <p role="alert" className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-200">{error}</p> : <p className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">{notice}</p>}</div>}
 
         <AdminMediaSourceCatalog />
+
+        <AdminSearchProvidersCatalog />
 
         <section aria-labelledby="create-account-heading" className="glass-panel mt-8 rounded-[2rem] p-5 sm:p-7">
           <div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-2xl bg-white text-zinc-950"><UserPlus size={20} aria-hidden="true" /></span><div><h2 id="create-account-heading" className="text-xl font-semibold">Create viewer account</h2><p className="text-sm text-zinc-500">Every new viewer must replace their temporary password.</p></div></div>

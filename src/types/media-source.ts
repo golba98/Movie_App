@@ -13,6 +13,7 @@ export interface MediaSource {
   sourceUrl: string
   mimeType: MediaMimeType
   rightsBasis: RightsBasis
+  isDynamic?: boolean
 }
 
 export interface AdminMediaSource extends MediaSource {
@@ -32,5 +33,24 @@ export interface MediaSourceInput {
   mimeType: MediaMimeType
   rightsBasis: RightsBasis
   rightsNote: string
+  active: boolean
+}
+
+export interface SearchProvider {
+  id: string
+  label: string
+  baseUrl: string
+  movieUrlPattern: string
+  tvUrlPattern: string
+  active: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SearchProviderInput {
+  label: string
+  baseUrl: string
+  movieUrlPattern: string
+  tvUrlPattern: string
   active: boolean
 }

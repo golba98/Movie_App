@@ -5,11 +5,6 @@ import {
   Maximize2,
   Minimize2,
   Play,
-  ShieldCheck,
-  Cpu,
-  Sparkles,
-  Check,
-  ExternalLink,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiRequest } from '../../api/client'
@@ -25,6 +20,8 @@ interface StreamingPlayerProps {
   title: string
   numberOfSeasons?: number | null
   sources: MediaSource[]
+  theaterMode: boolean
+  onTheaterModeChange: (open: boolean) => void
 }
 
 export function StreamingPlayer({
@@ -33,11 +30,12 @@ export function StreamingPlayer({
   title,
   numberOfSeasons,
   sources,
+  theaterMode,
+  onTheaterModeChange,
 }: StreamingPlayerProps) {
   const initialSource = sources[0]
   const [activeSeason, setActiveSeason] = useState(initialSource?.seasonNumber ?? 1)
   const [activeEpisode, setActiveEpisode] = useState(initialSource?.episodeNumber ?? 1)
-  const [theaterMode, setTheaterMode] = useState(false)
   const [seasonDropdownOpen, setSeasonDropdownOpen] = useState(false)
   const [episodes, setEpisodes] = useState<Episode[]>([])
   const [loadingEpisodes, setLoadingEpisodes] = useState(mediaType === 'tv')
@@ -45,36 +43,67 @@ export function StreamingPlayer({
   const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
   const [extractedUrl, setExtractedUrl] = useState<string | null>(null)
   const [isExtracting, setIsExtracting] = useState(false)
-  const [botStep, setBotStep] = useState(0)
-  const [botFinished, setBotFinished] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  const activeSource = useMemo(() => {
-    if (mediaType === 'movie') {
-      return sources[0]
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSelectedSourceId(null)
+  }, [id, activeSeason, activeEpisode])
+
+  useEffect(() => {
+    if (!theaterMode) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onTheaterModeChange(false)
     }
-    const dbSource = sources.find(
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [theaterMode, onTheaterModeChange])
+
+  const playableSources = useMemo(() => {
+    if (mediaType === 'movie') {
+      return sources
+    }
+    const dbSources = sources.filter(
       (source) => source.seasonNumber === activeSeason && source.episodeNumber === activeEpisode
     )
-    if (dbSource) return dbSource
-
-    const dynamicSource = sources.find(
-      (source) => source.id === 'flixbaba'
-    )
-    if (dynamicSource) {
-      const url = `${dynamicSource.sourceUrl}/season/${activeSeason}?e=${activeEpisode}`
+    const dynamicSources = sources.filter(
+      (source) => source.isDynamic
+    ).map((source) => {
+      let url = source.sourceUrl
+      if (url.includes('{season}') || url.includes('{episode}')) {
+        url = url
+          .replace(/{season}/g, String(activeSeason))
+          .replace(/{episode}/g, String(activeEpisode))
+      } else {
+        url = `${url}/season/${activeSeason}?e=${activeEpisode}`
+      }
       return {
-        ...dynamicSource,
+        ...source,
         seasonNumber: activeSeason,
         episodeNumber: activeEpisode,
         sourceUrl: url,
       }
-    }
-    return undefined
+    })
+    return [...dbSources, ...dynamicSources]
   }, [sources, mediaType, activeSeason, activeEpisode])
 
+  const activeSource = useMemo(() => {
+    if (playableSources.length === 0) return undefined
+    if (selectedSourceId) {
+      const selected = playableSources.find((s) => s.id === selectedSourceId)
+      if (selected) return selected
+    }
+    return playableSources[0]
+  }, [playableSources, selectedSourceId])
+
   const availableSeasons = useMemo(() => {
-    const hasDynamic = sources.some((source) => source.id === 'flixbaba')
+    const hasDynamic = sources.some((source) => source.isDynamic)
     if (hasDynamic && numberOfSeasons) {
       return Array.from({ length: numberOfSeasons }, (_, i) => i + 1)
     }
@@ -113,7 +142,7 @@ export function StreamingPlayer({
       return
     }
 
-    const isIframe = activeSource.sourceUrl.includes('flixbaba')
+    const isIframe = activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') || activeSource.isDynamic
     if (!isIframe) {
       setExtractedUrl(null)
       setIsExtracting(false)
@@ -142,30 +171,11 @@ export function StreamingPlayer({
     return () => controller.abort()
   }, [activeSource])
 
-  useEffect(() => {
-    if (isExtracting) {
-      setBotStep(0)
-      setBotFinished(false)
-      const interval = setInterval(() => {
-        setBotStep((prev) => {
-          if (prev < 4) {
-            return prev + 1
-          } else {
-            clearInterval(interval)
-            setBotFinished(true)
-            return prev
-          }
-        })
-      }, 450)
-      return () => clearInterval(interval)
-    }
-  }, [isExtracting])
 
-  const showBotLoading = isExtracting || (activeSource?.sourceUrl?.includes('flixbaba') && !botFinished && extractedUrl !== null)
 
   const catalogEpisodes = useMemo(() => {
     const byEpisode = new Map(episodes.map((episode) => [episode.episode_number, episode]))
-    const hasDynamic = sources.some((source) => source.id === 'flixbaba')
+    const hasDynamic = sources.some((source) => source.isDynamic)
 
     if (hasDynamic) {
       return episodes.map((episode) => {
@@ -224,93 +234,71 @@ export function StreamingPlayer({
         <div className={theaterMode || mediaType === 'movie' ? 'w-full' : 'lg:col-span-2'}>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1">
             <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Authorised direct media</p>
               <h2 id="player-heading" className="mt-1 line-clamp-1 text-lg font-black text-white">
                 {title}{mediaType === 'tv' ? ` — S${activeSeason} E${activeEpisode}` : ''}
               </h2>
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/8 px-3 text-[11px] font-bold text-emerald-200">
-                <ShieldCheck size={14} aria-hidden="true" />
-                {activeSource.rightsBasis.replace('-', ' ')}
-              </span>
               <button
                 type="button"
-                onClick={() => setTheaterMode((current) => !current)}
+                onClick={() => onTheaterModeChange(true)}
                 className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                aria-label={theaterMode ? 'Exit theater mode' : 'Theater mode'}
-                title={theaterMode ? 'Exit theater mode' : 'Theater mode'}
+                aria-label="Theater mode"
+                title="Theater mode"
               >
-                {theaterMode ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                <Maximize2 size={17} aria-hidden="true" />
               </button>
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
-            {showBotLoading && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/90 px-6 text-center text-zinc-400 backdrop-blur-2xl transition-all duration-300">
-                <div className="relative mb-6 flex items-center justify-center">
-                  <div className="absolute size-20 rounded-full bg-gradient-to-tr from-indigo-600 to-emerald-500 opacity-20 blur-xl animate-pulse" />
-                  <div className="size-16 rounded-full border border-white/10 p-1 flex items-center justify-center">
-                    <div className="size-full rounded-full border-t-2 border-r-2 border-indigo-400 animate-spin" />
-                  </div>
-                  <div className="absolute">
-                    <Cpu className="size-6 text-indigo-300 animate-pulse" />
-                  </div>
-                </div>
-                
-                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-white">
-                  CineBot Direct HD Engine
-                </h3>
-                <p className="mt-1 text-[9px] font-semibold text-zinc-500 uppercase tracking-widest">
-                  Optimizing stream configuration
-                </p>
+          {playableSources.length > 1 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2 px-1">
+              <span className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 mr-1">Source Server:</span>
+              {playableSources.map((source) => (
+                <button
+                  key={source.id}
+                  type="button"
+                  onClick={() => setSelectedSourceId(source.id)}
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 ${
+                    activeSource?.id === source.id
+                      ? 'bg-emerald-500/12 border border-emerald-400/30 text-emerald-300 shadow-md shadow-emerald-500/10'
+                      : 'bg-white/5 border border-white/5 text-zinc-400 hover:bg-white/10 hover:border-white/10 hover:text-zinc-200'
+                  }`}
+                >
+                  {source.label.replace(' Stream (Dynamic)', '')}
+                </button>
+              ))}
+            </div>
+          )}
 
-                <div className="mt-6 w-full max-w-xs space-y-2.5 text-left border border-white/5 bg-white/[0.02] p-4 rounded-2xl shadow-xl backdrop-blur-md">
-                  {[
-                    'Initializing CineBot stream scanner...',
-                    'Analyzing bitrate quality & container profile...',
-                    'Stripping 3rd-party ad trackers & overlays...',
-                    'Verifying secure player delivery channel...',
-                    'Stream verified. Playback is ready!'
-                  ].map((text, idx) => {
-                    const isCompleted = idx < botStep
-                    const isActive = idx === botStep
-                    return (
-                      <div
-                        key={idx}
-                        className={`flex items-center gap-3 text-xs transition-all duration-300 ${
-                          isCompleted
-                            ? 'text-zinc-200'
-                            : isActive
-                            ? 'text-indigo-300 font-bold scale-[1.02]'
-                            : 'text-zinc-650 opacity-40'
-                        }`}
-                      >
-                        {isCompleted ? (
-                          <span className="flex size-4 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
-                            <Check size={10} strokeWidth={3} />
-                          </span>
-                        ) : isActive ? (
-                          <span className="flex size-4 items-center justify-center">
-                            <span className="size-1.5 rounded-full bg-indigo-400 animate-ping" />
-                          </span>
-                        ) : (
-                          <span className="flex size-4 items-center justify-center">
-                            <span className="size-1 rounded-full bg-zinc-800" />
-                          </span>
-                        )}
-                        <span className="truncate">{text}</span>
-                      </div>
-                    )
-                  })}
-                </div>
+          {/* Promoted to full-viewport with CSS rather than reparented — moving the
+              iframe/video in the DOM would remount it and restart playback. */}
+          <div
+            className={
+              theaterMode
+                ? 'fixed inset-0 z-50 flex items-center justify-center bg-black'
+                : 'relative overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10'
+            }
+          >
+            {theaterMode && (
+              <button
+                type="button"
+                onClick={() => onTheaterModeChange(false)}
+                className="absolute right-4 top-4 z-20 grid size-11 place-items-center rounded-full bg-black/70 text-zinc-200 ring-1 ring-white/15 backdrop-blur transition hover:bg-black/90 hover:text-white"
+                aria-label="Exit theater mode"
+              >
+                <Minimize2 size={18} aria-hidden="true" />
+              </button>
+            )}
+            {isExtracting && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/85 backdrop-blur-sm transition-all duration-300">
+                <div className="size-8 rounded-full border border-white/10 border-t-white animate-spin" />
               </div>
             )}
-            {activeSource.sourceUrl.includes('flixbaba') ? (
+            {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') || activeSource.isDynamic ? (
               <iframe
                 src={extractedUrl ?? activeSource.sourceUrl}
-                className="block aspect-video size-full bg-black object-contain border-0"
+                className={`block size-full border-0 bg-black object-contain ${theaterMode ? '' : 'aspect-video'}`}
                 allowFullScreen
                 allow="autoplay; encrypted-media; picture-in-picture"
                 sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
@@ -323,7 +311,7 @@ export function StreamingPlayer({
                 controls
                 playsInline
                 preload="metadata"
-                className="block aspect-video size-full bg-black object-contain"
+                className={`block size-full bg-black object-contain ${theaterMode ? '' : 'aspect-video'}`}
                 aria-label={`Video player for ${title}`}
                 onLoadedMetadata={() => setMediaError(null)}
                 onError={(event) => {
@@ -337,50 +325,7 @@ export function StreamingPlayer({
             )}
           </div>
 
-          <div className="mt-4 border border-white/5 bg-white/[0.02] p-5 rounded-2xl shadow-xl backdrop-blur-md">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="space-y-3 flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <div className="flex items-center gap-1.5 rounded-lg bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300 ring-1 ring-indigo-500/20">
-                    <Sparkles size={11} />
-                    CineBot Optimized
-                  </div>
-                  <h4 className="text-sm font-semibold text-zinc-200">{activeSource.label}</h4>
-                </div>
-                
-                {/* Apple-style Specs Badge Row */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">1080p HD</span>
-                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">Direct Link</span>
-                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">No Trackers</span>
-                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">H.264 HEVC</span>
-                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">Dolby Atmos</span>
-                  <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-emerald-400 ring-1 ring-emerald-500/20 uppercase flex items-center gap-1 flex-wrap">
-                    <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Pristine Quality
-                  </span>
-                </div>
 
-                <p className="max-w-2xl text-xs leading-relaxed text-zinc-400">
-                  {activeSource.sourceUrl.includes('flixbaba')
-                    ? 'CineBot has optimized this stream for pristine high-fidelity playback. All third-party advertising overlays, malicious pop-ups, scripts, and layouts have been safely stripped. Content is streamed via a direct container.'
-                    : 'Protected DRM or native browser output constraints can still prevent third-party capture. This player streams directly to secure HTML5 media elements for high-performance decoding.'}
-                </p>
-              </div>
-
-              {activeSource.sourceUrl.includes('flixbaba') && (
-                <a
-                  href={activeSource.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10 hover:border-white/20 active:scale-95 shrink-0"
-                >
-                  <ExternalLink size={13} />
-                  Open Raw Stream Source
-                </a>
-              )}
-            </div>
-          </div>
 
           {currentMediaError && (
             <p role="alert" className="mt-3 flex items-start gap-2 rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm text-red-200">
