@@ -172,7 +172,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
           this max-w-5xl panel. The transition is dropped too, otherwise `scale: 1`
           lingers for the duration while animating out to `none`. */}
       <div
-        className={`relative z-10 w-full max-w-5xl h-full max-h-[92vh] sm:max-h-[85vh] overflow-y-auto [scrollbar-gutter:stable] rounded-3xl border border-white/10 bg-zinc-950 shadow-2xl ease-out ${
+        className={`scrollbar-subtle relative z-10 w-full max-w-5xl h-full max-h-[92vh] sm:max-h-[85vh] overflow-y-auto [scrollbar-gutter:stable] rounded-3xl border border-white/10 bg-zinc-950 shadow-2xl ease-out ${
           theaterMode
             ? 'opacity-100 transition-none'
             : `transition-all duration-200 ${

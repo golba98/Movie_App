@@ -157,18 +157,38 @@ textarea {
   opacity: 0.55;
 }
 
-.scrollbar-subtle {
-  scrollbar-color: rgb(113 113 122 / 70%) transparent;
-  scrollbar-width: thin;
+/* Styled scrollbars used across the app (horizontal media rows and the details
+   modal). Chromium/WebKit get a rounded, inset "pill" thumb via the -webkit-*
+   pseudo-elements — note we deliberately do NOT set the standard
+   `scrollbar-width`/`scrollbar-color` here, because in Chromium those switch off
+   the ::-webkit-scrollbar path and would shrink the bar back to the thin default.
+   Firefox falls back to its native scrollbar, which stays functional. */
+.scrollbar-subtle::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
 }
 
-.scrollbar-subtle::-webkit-scrollbar {
-  height: 8px;
+.scrollbar-subtle::-webkit-scrollbar-track {
+  margin: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 5%);
 }
 
 .scrollbar-subtle::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgb(113 113 122 / 70%);
+  border: 2px solid transparent;
+  background: rgb(228 228 231 / 55%);
+  background-clip: padding-box;
+}
+
+.scrollbar-subtle::-webkit-scrollbar-thumb:hover {
+  background: rgb(245 245 245 / 80%);
+  background-clip: padding-box;
+}
+
+.scrollbar-subtle::-webkit-scrollbar-thumb:active {
+  background: rgb(250 250 250 / 92%);
+  background-clip: padding-box;
 }
 
 .line-clamp-2,
