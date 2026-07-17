@@ -8,6 +8,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { apiRequest } from '../../api/client'
 import { getTvSeasonDetails } from '../../api/tmdb'
 import { useVideoDiagnostics } from '../../hooks/useVideoDiagnostics'
 import type { MediaSource } from '../../types/media-source'
@@ -38,6 +39,8 @@ export function StreamingPlayer({
   const [loadingEpisodes, setLoadingEpisodes] = useState(mediaType === 'tv')
   const [episodesError, setEpisodesError] = useState<string | null>(null)
   const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
+  const [extractedUrl, setExtractedUrl] = useState<string | null>(null)
+  const [isExtracting, setIsExtracting] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   const activeSource = useMemo(() => {
@@ -98,6 +101,42 @@ export function StreamingPlayer({
       })
     return () => controller.abort()
   }, [activeSeason, id, mediaType])
+
+  useEffect(() => {
+    if (!activeSource || !activeSource.sourceUrl) {
+      setExtractedUrl(null)
+      setIsExtracting(false)
+      return
+    }
+
+    const isIframe = activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day')
+    if (!isIframe) {
+      setExtractedUrl(null)
+      setIsExtracting(false)
+      return
+    }
+
+    const controller = new AbortController()
+    setIsExtracting(true)
+    setExtractedUrl(null)
+
+    apiRequest<{ extractedUrl: string | null }>(
+      `/api/media-sources/extract?url=${encodeURIComponent(activeSource.sourceUrl)}`,
+      { signal: controller.signal }
+    )
+      .then((data) => {
+        setExtractedUrl(data.extractedUrl ?? activeSource.sourceUrl)
+        setIsExtracting(false)
+      })
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        console.error('Extractor failed:', err)
+        setExtractedUrl(activeSource.sourceUrl)
+        setIsExtracting(false)
+      })
+
+    return () => controller.abort()
+  }, [activeSource])
 
   const catalogEpisodes = useMemo(() => {
     const byEpisode = new Map(episodes.map((episode) => [episode.episode_number, episode]))
@@ -182,10 +221,19 @@ export function StreamingPlayer({
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
+          <div className="relative overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
+            {isExtracting && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/95 text-zinc-450 backdrop-blur-md">
+                <div className="size-8 animate-spin rounded-full border-2 border-zinc-700 border-t-white" />
+                <span className="mt-4 text-xs font-black tracking-widest uppercase text-zinc-350">
+                  De-wrapping Streaming Player...
+                </span>
+                <span className="mt-1 text-[10px] text-zinc-505 font-medium">Extracting direct video source to block ads</span>
+              </div>
+            )}
             {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') ? (
               <iframe
-                src={activeSource.sourceUrl}
+                src={extractedUrl ?? activeSource.sourceUrl}
                 className="block aspect-video size-full bg-black object-contain border-0"
                 allowFullScreen
                 allow="autoplay; encrypted-media; picture-in-picture"
@@ -218,14 +266,19 @@ export function StreamingPlayer({
               <p className="text-sm font-semibold text-zinc-200">{activeSource.label}</p>
               {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') ? (
                 <p className="mt-1 text-xs text-zinc-500">
-                  External streaming source ·{' '}
+                  {extractedUrl && extractedUrl !== activeSource.sourceUrl ? (
+                    <span className="text-emerald-450 font-black">🟢 Direct video stream de-wrapped successfully</span>
+                  ) : (
+                    <span>External streaming source</span>
+                  )}
+                  {' · '}
                   <a
                     href={activeSource.sourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-brand-400 hover:text-brand-300 underline font-bold"
                   >
-                    Open in new tab
+                    Open raw page
                   </a>
                 </p>
               ) : (
@@ -234,7 +287,7 @@ export function StreamingPlayer({
             </div>
             <p className="max-w-lg text-xs leading-5 text-zinc-500">
               {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day')
-                ? 'This player streams from a third-party server. Ads or redirects might be handled by the source host.'
+                ? 'Website layouts and surrounding ads are stripped. The direct embed video is streamed cleanly.'
                 : 'Protected DRM or operating-system output restrictions can still prevent third-party media capture. This player does not bypass them.'}
             </p>
           </div>

@@ -385,3 +385,61 @@ export async function deleteMediaSource(request: Request, env: Env, id: string) 
   })
   return json({ removed: true })
 }
+
+async function extractDirectPlayerUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    })
+    if (res.status !== 200) return null
+    const html = await res.text()
+
+    // 1. Look for iframe src
+    const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i)
+    if (iframeMatch && iframeMatch[1]) {
+      let src = iframeMatch[1]
+      if (src.startsWith('//')) {
+        src = `https:${src}`
+      } else if (src.startsWith('/')) {
+        const parsedUrl = new URL(url)
+        src = `${parsedUrl.origin}${src}`
+      }
+      return src
+    }
+
+    // 2. Fallback: Search for any link matching known player domains
+    const playerPattern = /https?:\/\/[^"'\s<>]*?(vidsrc|embed|vidplay|filemoon|streamtape|mcloud|player|2embed)[^"'\s<>]*/gi
+    const matches = html.match(playerPattern)
+    if (matches && matches.length > 0) {
+      const originalHost = new URL(url).hostname
+      // Find the first player link that is not the same host
+      const validLink = matches.find((link) => !link.includes(originalHost))
+      if (validLink) return validLink
+    }
+
+    return null
+  } catch (e) {
+    console.error(`Failed to extract player from ${url}:`, e)
+    return null
+  }
+}
+
+export async function extractStreamEndpoint(request: Request, env: Env) {
+  await requireUser(request, env.DB)
+  const url = new URL(request.url)
+  const targetUrl = url.searchParams.get('url')
+  if (!targetUrl) {
+    throw new ApiError(400, 'MISSING_URL', 'The url parameter is required.')
+  }
+  
+  const cleanedUrl = cleanSourceUrl(targetUrl)
+  if (!cleanedUrl) {
+    throw new ApiError(400, 'INVALID_URL', 'Use a valid HTTPS target URL.')
+  }
+
+  const extractedUrl = await extractDirectPlayerUrl(cleanedUrl)
+  return json({ extractedUrl })
+}
