@@ -179,13 +179,20 @@ async function checkUrlAvailability(url: string): Promise<boolean> {
       },
       cf: { cacheTtl: 86400 } as unknown as { cacheTtl: number },
     })
-    if (res.status !== 200) return false
-    const html = await res.text()
-    if (html.includes('404') || html.includes('Page Not Found') || html.includes('not found')) {
+    console.log(`Availability check for ${url} returned status: ${res.status}`)
+    if (res.status === 404) {
       return false
     }
+    if (res.status === 200) {
+      const html = await res.text()
+      if (html.includes('404') || html.includes('Page Not Found') || html.includes('not found')) {
+        console.log(`Availability check for ${url} failed html check: contains 404/not found`)
+        return false
+      }
+    }
     return true
-  } catch {
+  } catch (err) {
+    console.error(`Availability check for ${url} failed with exception:`, err)
     return false
   }
 }
