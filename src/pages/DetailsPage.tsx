@@ -148,7 +148,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                 <span role="status" className="inline-flex min-h-12 items-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-400">
                   Checking authorised playback…
                 </span>
-              ) : (
+              ) : mediaSources.length > 0 ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -157,9 +157,9 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                   className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-brand-400 px-5 font-black text-zinc-950 transition hover:bg-brand-500"
                 >
                   <Play size={18} fill="currentColor" aria-hidden="true" />
-                  {mediaSources.length > 0 ? 'Watch authorised video' : 'View video player'}
+                  Watch authorised video
                 </button>
-              )}
+              ) : null}
               {trailer && (
                 <button
                   type="button"
@@ -197,7 +197,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
             <h2 id="player-loading-heading" className="mt-1 text-xl font-black text-white">Checking playback availability…</h2>
             <div className="mt-4 aspect-video animate-pulse rounded-2xl bg-black ring-1 ring-white/10" />
           </section>
-        ) : (
+        ) : mediaSources.length > 0 ? (
           <StreamingPlayer
             id={id}
             mediaType={mediaType}
@@ -205,7 +205,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
             numberOfSeasons={tv?.number_of_seasons}
             sources={mediaSources}
           />
-        )}
+        ) : null}
         <section aria-labelledby="cast-heading">
           <h2 id="cast-heading" className="mb-5 text-2xl font-black">Main cast</h2>
           <CastList cast={cast} />
