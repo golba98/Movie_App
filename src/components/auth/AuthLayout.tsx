@@ -1,3 +1,4 @@
+import { Eye, EyeOff } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { BrandMark } from '../layout/BrandMark'
 
@@ -86,6 +87,8 @@ export function AuthField({
   describedBy,
 }: AuthFieldProps) {
   const [focused, setFocused] = useState(false)
+  const [passwordVisible, setPasswordVisible] = useState(false)
+  const isPassword = type === 'password'
   const raised = focused || value.length > 0
 
   return (
@@ -93,7 +96,7 @@ export function AuthField({
       <input
         id={id}
         required
-        type={type}
+        type={isPassword && passwordVisible ? 'text' : type}
         value={value}
         autoComplete={autoComplete}
         autoFocus={autoFocus}
@@ -103,7 +106,7 @@ export function AuthField({
         onChange={(event) => onChange(event.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        className="h-full w-full bg-transparent px-[16px] pb-[4px] pt-[20px] text-[17px] text-[#fafafa] outline-none"
+        className={`h-full w-full bg-transparent px-[16px] pb-[4px] pt-[20px] text-[17px] text-[#fafafa] outline-none ${isPassword ? 'pr-[52px]' : ''}`}
       />
       <label
         htmlFor={id}
@@ -113,6 +116,19 @@ export function AuthField({
       >
         {label}
       </label>
+      {isPassword && (
+        <button
+          type="button"
+          onClick={() => setPasswordVisible((visible) => !visible)}
+          onMouseDown={(event) => event.preventDefault()}
+          aria-label={`${passwordVisible ? 'Hide' : 'Show'} ${label}`}
+          aria-controls={id}
+          aria-pressed={passwordVisible}
+          className="absolute right-2 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full text-zinc-500 transition hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        >
+          {passwordVisible ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+        </button>
+      )}
     </div>
   )
 }

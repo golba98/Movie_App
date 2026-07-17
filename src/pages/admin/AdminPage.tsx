@@ -1,6 +1,8 @@
 import {
   Activity,
   ArrowLeft,
+  Eye,
+  EyeOff,
   KeyRound,
   LogOut,
   RefreshCw,
@@ -35,6 +37,49 @@ const MIN_EXPIRY_DATE = dateInputValue(new Date().getTime() + 86_400_000)
 
 function expiryValue(value: string) {
   return value ? new Date(`${value}T23:59:59`).getTime() : null
+}
+
+interface PasswordInputProps {
+  id: string
+  label: string
+  value: string
+  onChange: (value: string) => void
+  autoFocus?: boolean
+}
+
+function PasswordInput({ id, label, value, onChange, autoFocus }: PasswordInputProps) {
+  const [visible, setVisible] = useState(false)
+
+  return (
+    <div className="text-sm text-zinc-300">
+      <label htmlFor={id}>{label}</label>
+      <span className="relative mt-2 block">
+        <input
+          id={id}
+          required
+          type={visible ? 'text' : 'password'}
+          minLength={12}
+          maxLength={128}
+          autoComplete="new-password"
+          autoFocus={autoFocus}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="form-input form-input-with-action"
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((current) => !current)}
+          onMouseDown={(event) => event.preventDefault()}
+          aria-label={`${visible ? 'Hide' : 'Show'} ${label}`}
+          aria-controls={id}
+          aria-pressed={visible}
+          className="absolute right-2 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full text-zinc-500 transition hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        >
+          {visible ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+        </button>
+      </span>
+    </div>
+  )
 }
 
 interface AccountCardProps {
@@ -320,7 +365,7 @@ export function AdminPage() {
           <form onSubmit={create} className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <label className="text-sm text-zinc-300">Username<input required minLength={3} maxLength={32} pattern="[A-Za-z0-9._-]+" value={newAccount.username} onChange={(event) => setNewAccount((current) => ({ ...current, username: event.target.value }))} className="form-input mt-2" /></label>
             <label className="text-sm text-zinc-300">Display name<input required maxLength={80} value={newAccount.displayName} onChange={(event) => setNewAccount((current) => ({ ...current, displayName: event.target.value }))} className="form-input mt-2" /></label>
-            <label className="text-sm text-zinc-300">Temporary password<input required type="password" minLength={12} maxLength={128} autoComplete="new-password" value={newAccount.temporaryPassword} onChange={(event) => setNewAccount((current) => ({ ...current, temporaryPassword: event.target.value }))} className="form-input mt-2" /></label>
+            <PasswordInput id="new-account-temporary-password" label="Temporary password" value={newAccount.temporaryPassword} onChange={(temporaryPassword) => setNewAccount((current) => ({ ...current, temporaryPassword }))} />
             <label className="text-sm text-zinc-300">Expiry (optional)<input type="date" min={MIN_EXPIRY_DATE} value={newAccount.expiresAt} onChange={(event) => setNewAccount((current) => ({ ...current, expiresAt: event.target.value }))} className="form-input mt-2" /></label>
             <button type="submit" disabled={busyId === 'create'} className="primary-button justify-center md:col-span-2 xl:col-span-4">{busyId === 'create' ? 'Creating…' : 'Create account'}<UserPlus size={18} aria-hidden="true" /></button>
           </form>
@@ -331,7 +376,7 @@ export function AdminPage() {
             <h2 id="accounts-heading" className="text-2xl font-semibold">Viewer accounts</h2>
             <form onSubmit={(event) => { event.preventDefault(); void loadData(search) }} className="relative w-full sm:w-80">
               <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} aria-hidden="true" />
-              <input type="search" aria-label="Search viewer accounts" placeholder="Search accounts" value={search} onChange={(event) => setSearch(event.target.value)} className="form-input pl-11" />
+              <input type="search" aria-label="Search viewer accounts" placeholder="Search accounts" value={search} onChange={(event) => setSearch(event.target.value)} className="form-input form-input-with-leading-icon" />
             </form>
           </div>
           {loadingData ? <p role="status" className="mt-6 text-zinc-400">Loading accounts…</p> : accounts.length ? <div className="mt-5 grid gap-4 lg:grid-cols-2">{accounts.map((account) => <AccountCard key={account.id} account={account} busy={busyId === account.id} onSave={saveAccount} onReset={setResetAccount} onRevoke={revokeSessions} />)}</div> : <p className="glass-panel mt-5 rounded-3xl p-8 text-center text-zinc-400">No accounts match this search.</p>}
@@ -352,7 +397,7 @@ export function AdminPage() {
             <h2 id="reset-heading" className="mt-5 text-2xl font-semibold">Reset {resetAccount.username}</h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">This revokes every active session. The viewer must change the new temporary password at their next sign-in.</p>
             <form onSubmit={reset} className="mt-6 space-y-4">
-              <label className="block text-sm">New temporary password<input autoFocus required type="password" minLength={12} maxLength={128} autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} className="form-input mt-2" /></label>
+              <PasswordInput id="reset-account-temporary-password" label="New temporary password" autoFocus value={resetPassword} onChange={setResetPassword} />
               <div className="grid grid-cols-2 gap-3"><button type="button" onClick={() => { setResetAccount(null); setResetPassword('') }} className="secondary-button justify-center">Cancel</button><button type="submit" disabled={busyId === resetAccount.id} className="primary-button justify-center">Reset</button></div>
             </form>
           </section>

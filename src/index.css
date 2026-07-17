@@ -101,6 +101,14 @@ textarea {
   transition: border-color 160ms ease, background 160ms ease;
 }
 
+.form-input.form-input-with-leading-icon {
+  padding-left: 2.75rem;
+}
+
+.form-input.form-input-with-action {
+  padding-right: 3.25rem;
+}
+
 .form-input:hover {
   border-color: rgb(255 255 255 / 20%);
 }
