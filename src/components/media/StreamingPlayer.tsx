@@ -4,7 +4,10 @@ import {
   Info,
   Maximize2,
   Minimize2,
+  Pause,
   Play,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -16,6 +19,8 @@ import type { Episode, MediaType } from '../../types/tmdb'
 import { imageUrl } from '../../utils/images'
 
 const EXTRACTION_TIMEOUT_MS = 15_000
+const IFRAME_LOAD_TIMEOUT_MS = 12_000
+const IFRAME_REVEAL_DELAY_MS = 180
 
 type DynamicPlayerStatus = 'idle' | 'extracting' | 'ready' | 'error'
 
@@ -38,6 +43,14 @@ function isEmbeddableUrl(candidate: string | null, wrapperUrl: string) {
   } catch {
     return false
   }
+}
+
+function formatPlaybackTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
+  const totalSeconds = Math.floor(seconds)
+  const minutes = Math.floor(totalSeconds / 60)
+  const remainingSeconds = totalSeconds % 60
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
 interface StreamingPlayerProps {
@@ -72,9 +85,16 @@ export function StreamingPlayer({
   const [dynamicPlayerError, setDynamicPlayerError] = useState<string | null>(null)
   const [extractionAttempt, setExtractionAttempt] = useState(0)
   const [inlinePlaybackRequested, setInlinePlaybackRequested] = useState(false)
+  const [iframeLoaded, setIframeLoaded] = useState(false)
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0)
+  const [videoDuration, setVideoDuration] = useState(0)
+  const [videoPlaying, setVideoPlaying] = useState(false)
+  const [videoMuted, setVideoMuted] = useState(false)
+  const [videoVolume, setVideoVolume] = useState(1)
   const videoRef = useRef<HTMLVideoElement>(null)
   const exitButtonRef = useRef<HTMLButtonElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
+  const iframeRevealTimerRef = useRef<number | null>(null)
 
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
 
@@ -226,6 +246,31 @@ export function StreamingPlayer({
     }
   }, [activeSource, activeSourceIsDynamic, dynamicPlaybackRequested, extractionAttempt])
 
+  useEffect(() => {
+    setIframeLoaded(false)
+    if (iframeRevealTimerRef.current !== null) {
+      window.clearTimeout(iframeRevealTimerRef.current)
+      iframeRevealTimerRef.current = null
+    }
+    return () => {
+      if (iframeRevealTimerRef.current !== null) {
+        window.clearTimeout(iframeRevealTimerRef.current)
+        iframeRevealTimerRef.current = null
+      }
+    }
+  }, [dynamicPlayerStatus, extractedUrl])
+
+  useEffect(() => {
+    if (dynamicPlayerStatus !== 'ready' || !extractedUrl || iframeLoaded) return
+
+    const timeout = window.setTimeout(() => {
+      setDynamicPlayerStatus('error')
+      setDynamicPlayerError('The embedded player did not finish loading. You can retry or stop safely.')
+    }, IFRAME_LOAD_TIMEOUT_MS)
+
+    return () => window.clearTimeout(timeout)
+  }, [dynamicPlayerStatus, extractedUrl, iframeLoaded])
+
 
 
   const catalogEpisodes = useMemo(() => {
@@ -282,6 +327,53 @@ export function StreamingPlayer({
   }
 
   const currentMediaError = mediaError?.sourceId === activeSource.id ? mediaError.message : null
+  const safeDuration = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : 0
+
+  const toggleVideoPlayback = () => {
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) {
+      void video.play().catch(() => {
+        setMediaError({
+          sourceId: activeSource.id,
+          message: 'The video could not start. Check the source format and host response.',
+        })
+      })
+      return
+    }
+    video.pause()
+  }
+
+  const seekVideo = (time: number) => {
+    const video = videoRef.current
+    if (!video || !Number.isFinite(time)) return
+    video.currentTime = time
+    setVideoCurrentTime(time)
+  }
+
+  const setVideoMutedState = (muted: boolean) => {
+    const video = videoRef.current
+    if (!video) return
+    video.muted = muted
+    setVideoMuted(muted)
+  }
+
+  const setVideoVolumeState = (volume: number) => {
+    const video = videoRef.current
+    if (!video) return
+    video.volume = volume
+    video.muted = volume === 0
+    setVideoVolume(volume)
+    setVideoMuted(volume === 0)
+  }
+
+  const revealIframe = () => {
+    if (iframeRevealTimerRef.current !== null) window.clearTimeout(iframeRevealTimerRef.current)
+    iframeRevealTimerRef.current = window.setTimeout(() => {
+      setIframeLoaded(true)
+      iframeRevealTimerRef.current = null
+    }, IFRAME_REVEAL_DELAY_MS)
+  }
 
   return (
     <section id="streaming-player" className="scroll-mt-20" aria-labelledby="player-heading">
@@ -381,13 +473,24 @@ export function StreamingPlayer({
                   </div>
                 </div>
               ) : dynamicPlayerStatus === 'ready' && extractedUrl ? (
-                <iframe
-                  src={extractedUrl}
-                  className={`block size-full border-0 bg-black object-contain ${theaterMode ? '' : 'aspect-video'}`}
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  sandbox="allow-scripts allow-same-origin allow-forms"
-                  aria-label={`Video player for ${title}`}
-                />
+                <div className={`relative size-full bg-black ${theaterMode ? '' : 'aspect-video'}`}>
+                  <iframe
+                    src={extractedUrl}
+                    className={`block size-full border-0 bg-black object-contain transition-opacity duration-200 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
+                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen 'none'"
+                    sandbox="allow-scripts allow-same-origin allow-forms"
+                    aria-label={`Video player for ${title}`}
+                    onLoad={revealIframe}
+                  />
+                  {!iframeLoaded && (
+                    <div role="status" className="absolute inset-0 z-10 grid place-items-center bg-black px-6 text-center">
+                      <div>
+                        <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
+                        <p className="mt-4 text-sm font-semibold text-zinc-300">Loading player…</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : dynamicPlayerStatus === 'error' ? (
                 <div className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'aspect-video'}`}>
                   <div role="alert" className="max-w-md">
@@ -426,23 +529,82 @@ export function StreamingPlayer({
                 </div>
               )
             ) : (
-              <video
-                ref={videoRef}
-                src={activeSource.sourceUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className={`block size-full bg-black object-contain ${theaterMode ? '' : 'aspect-video'}`}
-                aria-label={`Video player for ${title}`}
-                onLoadedMetadata={() => setMediaError(null)}
-                onError={(event) => {
-                  const video = event.currentTarget
-                  setMediaError({
-                    sourceId: activeSource.id,
-                    message: video.error?.message || 'The authorised video could not be loaded. Check the source format and host response.',
-                  })
-                }}
-              />
+              <>
+                <video
+                  ref={videoRef}
+                  src={activeSource.sourceUrl}
+                  playsInline
+                  preload="metadata"
+                  className={`block size-full bg-black object-contain ${theaterMode ? '' : 'aspect-video'}`}
+                  aria-label={`Video player for ${title}`}
+                  onDoubleClick={(event) => event.preventDefault()}
+                  onLoadedMetadata={(event) => {
+                    const video = event.currentTarget
+                    setMediaError(null)
+                    setVideoDuration(video.duration)
+                    setVideoCurrentTime(video.currentTime)
+                    setVideoVolume(video.volume)
+                    setVideoMuted(video.muted)
+                  }}
+                  onDurationChange={(event) => setVideoDuration(event.currentTarget.duration)}
+                  onTimeUpdate={(event) => setVideoCurrentTime(event.currentTarget.currentTime)}
+                  onPlay={() => setVideoPlaying(true)}
+                  onPause={() => setVideoPlaying(false)}
+                  onVolumeChange={(event) => {
+                    setVideoMuted(event.currentTarget.muted)
+                    setVideoVolume(event.currentTarget.volume)
+                  }}
+                  onError={(event) => {
+                    const video = event.currentTarget
+                    setMediaError({
+                      sourceId: activeSource.id,
+                      message: video.error?.message || 'The authorised video could not be loaded. Check the source format and host response.',
+                    })
+                  }}
+                />
+                <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/95 via-black/70 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4">
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-200">
+                    <button
+                      type="button"
+                      onClick={toggleVideoPlayback}
+                      className="grid size-10 shrink-0 place-items-center rounded-full bg-white text-black transition hover:bg-zinc-200"
+                      aria-label={videoPlaying ? 'Pause video' : 'Play video'}
+                    >
+                      {videoPlaying ? <Pause size={17} fill="currentColor" aria-hidden="true" /> : <Play size={17} fill="currentColor" aria-hidden="true" />}
+                    </button>
+                    <span className="shrink-0 tabular-nums" aria-live="off">{formatPlaybackTime(videoCurrentTime)} / {formatPlaybackTime(safeDuration)}</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max={safeDuration || 0}
+                      step="0.1"
+                      value={Math.min(videoCurrentTime, safeDuration || 0)}
+                      onChange={(event) => seekVideo(Number(event.target.value))}
+                      disabled={safeDuration === 0}
+                      className="min-w-20 flex-1 accent-white disabled:opacity-40"
+                      aria-label="Seek video"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setVideoMutedState(!videoMuted)}
+                      className="grid size-10 shrink-0 place-items-center rounded-full text-zinc-100 transition hover:bg-white/10"
+                      aria-label={videoMuted ? 'Unmute video' : 'Mute video'}
+                    >
+                      {videoMuted ? <VolumeX size={18} aria-hidden="true" /> : <Volume2 size={18} aria-hidden="true" />}
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={videoMuted ? 0 : videoVolume}
+                      onChange={(event) => setVideoVolumeState(Number(event.target.value))}
+                      className="w-20 accent-white sm:w-24"
+                      aria-label="Video volume"
+                    />
+                  </div>
+                </div>
+              </>
             )}
           </div>
 

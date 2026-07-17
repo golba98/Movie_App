@@ -3,6 +3,7 @@ import { SELF } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { PASSWORD_ITERATIONS } from '../crypto'
 import worker from '../index'
+import { extractDirectPlayerUrl } from '../media-sources'
 
 const origin = 'https://fedora.test'
 
@@ -59,11 +60,16 @@ async function createAccount(
 
 async function activeViewerCookies() {
   const admin = await adminCookie()
-  await createAccount(admin)
+  const viewer = await activeViewerCookie(admin, 'viewer.one', 'Viewer One')
+  return { admin, viewer }
+}
+
+async function activeViewerCookie(admin: string, username: string, displayName: string) {
+  await createAccount(admin, { username, displayName })
   const login = await request('/api/auth/login', {
     method: 'POST',
     origin,
-    body: { username: 'viewer.one', password: 'temporary-password-123' },
+    body: { username, password: 'temporary-password-123' },
   })
   const viewer = cookieFrom(login)
   const changed = await request('/api/auth/change-password', {
@@ -76,7 +82,7 @@ async function activeViewerCookies() {
     },
   })
   expect(changed.status).toBe(200)
-  return { admin, viewer }
+  return viewer
 }
 
 async function createMediaSource(cookie: string, overrides: Record<string, unknown> = {}) {
@@ -412,6 +418,33 @@ describe('authorised media-source catalog', () => {
       )
       expect(response.status).toBe(200)
       expect(outbound).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('runs independent dynamic player resolutions concurrently', async () => {
+    let inFlight = 0
+    let maxInFlight = 0
+    const outbound = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal)
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await Promise.resolve()
+      inFlight -= 1
+      return new Response('<iframe src="https://player.example.test/embed"></iframe>', { status: 200 })
+    })
+    vi.stubGlobal('fetch', outbound)
+    try {
+      const [first, second] = await Promise.all([
+        extractDirectPlayerUrl('https://resolver.example.test/first', new AbortController().signal),
+        extractDirectPlayerUrl('https://resolver.example.test/second', new AbortController().signal),
+      ])
+      expect(maxInFlight).toBe(2)
+      expect([first, second]).toEqual([
+        'https://player.example.test/embed',
+        'https://player.example.test/embed',
+      ])
     } finally {
       vi.unstubAllGlobals()
     }

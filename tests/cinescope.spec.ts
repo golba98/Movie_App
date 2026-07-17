@@ -565,25 +565,40 @@ test('plays only administrator-configured authorised media sources', async ({ pa
   await expect(player).toBeVisible()
   const movieVideo = player.getByLabel('Video player for Dune: Part Two')
   await expect(movieVideo).toHaveAttribute('src', '/test-media/capture-test.mp4')
-  await expect(movieVideo).toHaveAttribute('controls', '')
+  await expect(movieVideo).not.toHaveAttribute('controls', '')
   await expect(movieVideo).toHaveAttribute('playsinline', '')
   await expect(movieVideo).toHaveAttribute('preload', 'metadata')
+  await expect(player.getByRole('button', { name: 'Play video' })).toBeVisible()
+  await expect(player.getByLabel('Seek video')).toBeVisible()
+  await expect(player.getByRole('button', { name: 'Mute video' })).toBeVisible()
+  await expect(player.getByLabel('Video volume')).toBeVisible()
   await expect(player.locator('iframe, canvas')).toHaveCount(0)
 
   await movieVideo.evaluate((element) => {
     const state = window as typeof window & {
       __movieVideo?: Element
       __moviePauseCalls?: number
+      __moviePlayCalls?: number
     }
     const video = element as HTMLVideoElement
     state.__movieVideo = video
     state.__moviePauseCalls = 0
+    state.__moviePlayCalls = 0
     const nativePause = video.pause.bind(video)
     video.pause = () => {
       state.__moviePauseCalls = (state.__moviePauseCalls ?? 0) + 1
       nativePause()
     }
+    video.play = () => {
+      state.__moviePlayCalls = (state.__moviePlayCalls ?? 0) + 1
+      video.dispatchEvent(new Event('play'))
+      return Promise.resolve()
+    }
   })
+  await player.getByRole('button', { name: 'Play video' }).click()
+  await expect(player.getByRole('button', { name: 'Pause video' })).toBeVisible()
+  expect(await page.evaluate(() => (window as typeof window & { __moviePlayCalls?: number }).__moviePlayCalls)).toBe(1)
+  await player.getByRole('button', { name: 'Pause video' }).click()
   await page.evaluate(() => {
     window.dispatchEvent(new Event('blur'))
     document.dispatchEvent(new Event('visibilitychange'))
@@ -728,8 +743,12 @@ test('dynamic players start inline, can expand to theater mode, and always leave
   let extractionRequests = 0
   let wrapperRequests = 0
   let releaseFirstExtraction = () => {}
+  let releaseEmbed = () => {}
   const firstExtractionPending = new Promise<void>((resolve) => {
     releaseFirstExtraction = resolve
+  })
+  const embedPending = new Promise<void>((resolve) => {
+    releaseEmbed = resolve
   })
 
   await page.route('**/api/media-sources/movie/1', async (route) => {
@@ -748,6 +767,7 @@ test('dynamic players start inline, can expand to theater mode, and always leave
     await route.abort('blockedbyclient')
   })
   await page.route('https://player.example.test/**', async (route) => {
+    await embedPending
     await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Test player</title>' })
   })
 
@@ -772,7 +792,12 @@ test('dynamic players start inline, can expand to theater mode, and always leave
   await expect(iframe).toHaveAttribute('src', embedUrl)
   await expect(iframe).not.toHaveAttribute('allowfullscreen', '')
   await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
+  await expect(iframe).toHaveAttribute('allow', "autoplay; encrypted-media; picture-in-picture; fullscreen 'none'")
+  await expect(page.getByRole('status')).toContainText('Loading player')
   expect(wrapperRequests).toBe(0)
+
+  releaseEmbed()
+  await expect(page.getByRole('status')).toHaveCount(0)
 
   const inlineBox = await iframe.boundingBox()
   expect(inlineBox?.width).toBeLessThan(1280)
