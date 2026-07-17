@@ -157,10 +157,12 @@ async function fetchTmdbTitle(env: Env, mediaType: string, tmdbId: number): Prom
 }
 
 
-function buildProviderUrl(pattern: string, baseUrl: string, tmdbId: number, slug: string) {
+function buildProviderUrl(pattern: string, baseUrl: string, tmdbId: number, slug: string, mediaType: MediaType) {
   let url = pattern
   if (!url) {
-    url = '{baseUrl}/movie/{tmdbId}/{slug}/watch'
+    url = mediaType === 'movie'
+      ? '{baseUrl}/movie/{tmdbId}/{slug}/watch'
+      : '{baseUrl}/tv/{tmdbId}/{slug}'
   }
   return url
     .replace(/{baseUrl}/g, baseUrl)
@@ -218,7 +220,7 @@ export async function listMediaSourcesForViewer(
           const slug = slugify(title)
           const providersToCheck = providersResult.results.map((provider) => {
             const pattern = mediaType === 'movie' ? provider.movie_url_pattern : provider.tv_url_pattern
-            const providerUrl = buildProviderUrl(pattern, provider.base_url, tmdbId, slug)
+            const providerUrl = buildProviderUrl(pattern, provider.base_url, tmdbId, slug, mediaType)
             return { provider, providerUrl }
           })
           
