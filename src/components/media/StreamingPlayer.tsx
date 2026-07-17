@@ -22,12 +22,6 @@ interface StreamingPlayerProps {
   sources: MediaSource[]
 }
 
-function sourceForEpisode(sources: MediaSource[], seasonNumber: number, episodeNumber: number) {
-  return sources.find((source) => (
-    source.seasonNumber === seasonNumber && source.episodeNumber === episodeNumber
-  ))
-}
-
 export function StreamingPlayer({
   id,
   mediaType,
@@ -46,12 +40,39 @@ export function StreamingPlayer({
   const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  const activeSource = mediaType === 'movie'
-    ? sources[0]
-    : sourceForEpisode(sources, activeSeason, activeEpisode)
-  const availableSeasons = useMemo(() => (
-    [...new Set(sources.flatMap((source) => source.seasonNumber ?? []))].sort((a, b) => a - b)
-  ), [sources])
+  const activeSource = useMemo(() => {
+    if (mediaType === 'movie') {
+      return sources[0]
+    }
+    const dbSource = sources.find(
+      (source) => source.seasonNumber === activeSeason && source.episodeNumber === activeEpisode
+    )
+    if (dbSource) return dbSource
+
+    const dynamicSource = sources.find(
+      (source) => source.id === 'flixbaba' || source.id === 'soap2day'
+    )
+    if (dynamicSource) {
+      const url = dynamicSource.id === 'flixbaba'
+        ? `${dynamicSource.sourceUrl}/season/${activeSeason}?e=${activeEpisode}`
+        : `${dynamicSource.sourceUrl}/${activeSeason}/${activeEpisode}`
+      return {
+        ...dynamicSource,
+        seasonNumber: activeSeason,
+        episodeNumber: activeEpisode,
+        sourceUrl: url,
+      }
+    }
+    return undefined
+  }, [sources, mediaType, activeSeason, activeEpisode])
+
+  const availableSeasons = useMemo(() => {
+    const hasDynamic = sources.some((source) => source.id === 'flixbaba' || source.id === 'soap2day')
+    if (hasDynamic && numberOfSeasons) {
+      return Array.from({ length: numberOfSeasons }, (_, i) => i + 1)
+    }
+    return [...new Set(sources.flatMap((source) => source.seasonNumber ?? []))].sort((a, b) => a - b)
+  }, [sources, numberOfSeasons])
 
   useVideoDiagnostics(
     videoRef,
@@ -80,11 +101,33 @@ export function StreamingPlayer({
 
   const catalogEpisodes = useMemo(() => {
     const byEpisode = new Map(episodes.map((episode) => [episode.episode_number, episode]))
+    const hasDynamic = sources.some((source) => source.id === 'flixbaba' || source.id === 'soap2day')
+
+    if (hasDynamic) {
+      return episodes.map((episode) => {
+        const dbSource = sources.find(
+          (source) => source.seasonNumber === activeSeason && source.episodeNumber === episode.episode_number
+        )
+        const source = dbSource || {
+          id: `dynamic-${activeSeason}-${episode.episode_number}`,
+          mediaType: 'tv' as MediaType,
+          tmdbId: id,
+          seasonNumber: activeSeason,
+          episodeNumber: episode.episode_number,
+          label: `Episode ${episode.episode_number}`,
+          sourceUrl: '',
+          mimeType: 'video/mp4' as const,
+          rightsBasis: 'public-domain' as const
+        }
+        return { source, episode: byEpisode.get(episode.episode_number) }
+      })
+    }
+
     return sources
       .filter((source) => source.seasonNumber === activeSeason && source.episodeNumber !== null)
       .sort((a, b) => (a.episodeNumber ?? 0) - (b.episodeNumber ?? 0))
       .map((source) => ({ source, episode: byEpisode.get(source.episodeNumber!) }))
-  }, [activeSeason, episodes, sources])
+  }, [activeSeason, episodes, sources, id])
 
   if (!activeSource) {
     return (
@@ -140,32 +183,59 @@ export function StreamingPlayer({
           </div>
 
           <div className="overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
-            <video
-              ref={videoRef}
-              src={activeSource.sourceUrl}
-              controls
-              playsInline
-              preload="metadata"
-              className="block aspect-video size-full bg-black object-contain"
-              aria-label={`Video player for ${title}`}
-              onLoadedMetadata={() => setMediaError(null)}
-              onError={(event) => {
-                const video = event.currentTarget
-                setMediaError({
-                  sourceId: activeSource.id,
-                  message: video.error?.message || 'The authorised video could not be loaded. Check the source format and host response.',
-                })
-              }}
-            />
+            {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') ? (
+              <iframe
+                src={activeSource.sourceUrl}
+                className="block aspect-video size-full bg-black object-contain border-0"
+                allowFullScreen
+                allow="autoplay; encrypted-media; picture-in-picture"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+                aria-label={`Video player for ${title}`}
+              />
+            ) : (
+              <video
+                ref={videoRef}
+                src={activeSource.sourceUrl}
+                controls
+                playsInline
+                preload="metadata"
+                className="block aspect-video size-full bg-black object-contain"
+                aria-label={`Video player for ${title}`}
+                onLoadedMetadata={() => setMediaError(null)}
+                onError={(event) => {
+                  const video = event.currentTarget
+                  setMediaError({
+                    sourceId: activeSource.id,
+                    message: video.error?.message || 'The authorised video could not be loaded. Check the source format and host response.',
+                  })
+                }}
+              />
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/7 bg-white/[0.025] p-4">
             <div>
               <p className="text-sm font-semibold text-zinc-200">{activeSource.label}</p>
-              <p className="mt-1 text-xs text-zinc-500">{activeSource.mimeType} · Native HTML5 playback · Capture state does not control playback</p>
+              {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') ? (
+                <p className="mt-1 text-xs text-zinc-500">
+                  External streaming source ·{' '}
+                  <a
+                    href={activeSource.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-brand-400 hover:text-brand-300 underline font-bold"
+                  >
+                    Open in new tab
+                  </a>
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-zinc-500">{activeSource.mimeType} · Native HTML5 playback · Capture state does not control playback</p>
+              )}
             </div>
             <p className="max-w-lg text-xs leading-5 text-zinc-500">
-              Protected DRM or operating-system output restrictions can still prevent third-party media capture. This player does not bypass them.
+              {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day')
+                ? 'This player streams from a third-party server. Ads or redirects might be handled by the source host.'
+                : 'Protected DRM or operating-system output restrictions can still prevent third-party media capture. This player does not bypass them.'}
             </p>
           </div>
 

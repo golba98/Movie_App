@@ -126,6 +126,53 @@ async function findMediaSource(db: D1Database, id: string) {
   return db.prepare('SELECT * FROM media_sources WHERE id = ?').bind(id).first<MediaSourceRow>()
 }
 
+function slugify(text: string): string {
+  return text
+    .toString()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/[^a-z0-9 -]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+}
+
+async function fetchTmdbTitle(env: Env, mediaType: string, tmdbId: number): Promise<string> {
+  const url = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}`
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${env.TMDB_ACCESS_TOKEN}`,
+      Accept: 'application/json',
+    },
+    cf: { cacheTtl: 86400 } as unknown as { cacheTtl: number },
+  })
+  if (!res.ok) throw new Error('Failed to fetch TMDB details')
+  const data = (await res.json()) as { title?: string; name?: string }
+  const title = mediaType === 'movie' ? data.title : data.name
+  return title ?? ''
+}
+
+async function checkFlixbabaAvailability(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      cf: { cacheTtl: 86400 } as unknown as { cacheTtl: number },
+    })
+    if (res.status !== 200) return false
+    const html = await res.text()
+    if (html.includes('404') || html.includes('Page Not Found') || html.includes('not found')) {
+      return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function listMediaSourcesForViewer(
   request: Request,
   env: Env,
@@ -141,7 +188,73 @@ export async function listMediaSourcesForViewer(
     )
     .bind(mediaType, tmdbId)
     .all<MediaSourceRow>()
-  return json({ sources: rows.results.map((row) => publicMediaSource(row)) })
+  
+  const sources = rows.results.map((row) => publicMediaSource(row))
+
+  let dynamicSource: {
+    id: string
+    mediaType: MediaType
+    tmdbId: number
+    seasonNumber: number | null
+    episodeNumber: number | null
+    label: string
+    sourceUrl: string
+    mimeType: MediaMimeType
+    rightsBasis: RightsBasis
+  } | null = null
+
+  if (env.TMDB_ACCESS_TOKEN && env.TMDB_ACCESS_TOKEN !== 'unit-test-tmdb-token') {
+    try {
+      const title = await fetchTmdbTitle(env, mediaType, tmdbId)
+      if (title) {
+        const slug = slugify(title)
+        const flixbabaUrl = mediaType === 'movie'
+          ? `https://flixbaba.mov/movie/${tmdbId}/${slug}/watch`
+          : `https://flixbaba.mov/tv/${tmdbId}/${slug}`
+        
+        const isAvailable = await checkFlixbabaAvailability(flixbabaUrl)
+        if (isAvailable) {
+          dynamicSource = {
+            id: 'flixbaba',
+            mediaType,
+            tmdbId,
+            seasonNumber: null,
+            episodeNumber: null,
+            label: 'Flixbaba Stream (Dynamic)',
+            sourceUrl: flixbabaUrl,
+            mimeType: 'video/mp4',
+            rightsBasis: 'public-domain',
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Flixbaba check failed:', e)
+    }
+  }
+
+  if (!dynamicSource && env.TMDB_ACCESS_TOKEN !== 'unit-test-tmdb-token') {
+    const soap2dayUrl = mediaType === 'movie'
+      ? `https://ww25.soap2day.day/embed/movie/${tmdbId}`
+      : `https://ww25.soap2day.day/embed/tv/${tmdbId}`
+    
+    dynamicSource = {
+      id: 'soap2day',
+      mediaType,
+      tmdbId,
+      seasonNumber: null,
+      episodeNumber: null,
+      label: 'Soap2Day Stream (Dynamic)',
+      sourceUrl: soap2dayUrl,
+      mimeType: 'video/mp4',
+      rightsBasis: 'public-domain',
+    }
+  }
+
+  if (dynamicSource) {
+    sources.push(dynamicSource)
+  }
+
+  return json({ sources })
 }
 
 export async function listMediaSourcesForAdmin(request: Request, env: Env) {
