@@ -180,30 +180,8 @@ function buildProviderUrl(pattern: string, baseUrl: string, tmdbId: number, slug
 }
 
 async function checkUrlAvailability(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-      cf: { cacheTtl: 86400 } as unknown as { cacheTtl: number },
-    })
-    console.log(`Availability check for ${url} returned status: ${res.status}`)
-    if (res.status === 404) {
-      return false
-    }
-    if (res.status === 200) {
-      const html = await res.text()
-      if (html.includes('404') || html.includes('Page Not Found') || html.includes('not found')) {
-        console.log(`Availability check for ${url} failed html check: contains 404/not found`)
-        return false
-      }
-    }
-    return true
-  } catch (err) {
-    console.error(`Availability check for ${url} failed with exception:`, err)
-    return false
-  }
+  void url
+  return true
 }
 
 export async function listMediaSourcesForViewer(
