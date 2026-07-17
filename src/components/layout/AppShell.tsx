@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router'
 import { useEffect } from 'react'
 import { Footer } from './Footer'
 import { Header } from './Header'
+import { LegacyImportBanner } from '../auth/LegacyImportBanner'
 import { MobileNavigation } from './MobileNavigation'
 
 export function AppShell() {
@@ -12,13 +13,14 @@ export function AppShell() {
   }, [location.pathname])
 
   return (
-    <div className="flex min-h-screen min-w-0 flex-col overflow-x-hidden bg-[#0a0a0a]">
+    <div className="flex min-h-dvh min-w-0 flex-col overflow-x-hidden bg-[#070709]">
       <Header />
-      <MobileNavigation />
-      <main className="min-w-0 flex-1">
+      <LegacyImportBanner />
+      <main className="min-w-0 flex-1 pb-24 md:pb-0">
         <Outlet />
       </main>
       <Footer />
+      <MobileNavigation />
     </div>
   )
 }

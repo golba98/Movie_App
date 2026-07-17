@@ -7,5 +7,7 @@ tsconfig.tsbuildinfo
 .env
 .env.local
 .env.*.local
+.dev.vars
+.dev.vars.*
 *.log
 .DS_Store

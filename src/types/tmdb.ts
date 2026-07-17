@@ -124,3 +124,22 @@ export interface TvDetails extends AppendedDetails {
 export interface FavouriteItem extends MediaItem {
   addedAt: number
 }
+
+export interface Episode {
+  id: number
+  name: string
+  overview?: string | null
+  episode_number: number
+  season_number: number
+  still_path?: string | null
+  air_date?: string | null
+}
+
+export interface TvSeasonDetails {
+  id: number
+  name: string
+  overview?: string | null
+  poster_path?: string | null
+  season_number: number
+  episodes: Episode[]
+}

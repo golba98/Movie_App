@@ -8,8 +8,12 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
-    "test": "playwright test",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "db:migrate:local": "wrangler d1 migrations apply movie-streaming-app-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply movie-streaming-app-db --remote",
+    "cf:types": "wrangler types",
     "preview": "vite preview",
     "deploy": "npm run build && npx wrangler deploy"
   },
@@ -20,6 +24,9 @@
     "react-router": "^8.2.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@cloudflare/vite-plugin": "^1.45.0",
+    "@cloudflare/vitest-pool-workers": "^0.18.5",
     "@eslint/js": "^10.0.0",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.2",
@@ -34,6 +41,8 @@
     "tailwindcss": "^4.3.2",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.64.0",
-    "vite": "^8.1.4"
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.111.0"
   }
 }

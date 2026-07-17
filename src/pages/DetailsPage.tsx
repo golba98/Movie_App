@@ -1,17 +1,20 @@
 import { CalendarDays, Clock, Heart, Play, Star, UserRound } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { getMovieDetails, getTvDetails, isTmdbConfigured } from '../api/tmdb'
-import { CastList } from '../components/CastList'
-import { DetailsSkeleton } from '../components/LoadingSkeleton'
-import { ErrorMessage } from '../components/ErrorMessage'
-import { MediaRow } from '../components/MediaRow'
-import { PosterImage } from '../components/PosterImage'
-import { SetupMessage } from '../components/SetupMessage'
-import { TrailerModal } from '../components/TrailerModal'
-import { WatchProviders } from '../components/WatchProviders'
+import { getMediaSources } from '../api/media-sources'
+import { getMovieDetails, getTvDetails } from '../api/tmdb'
+import { CastList } from '../components/media/CastList'
+import { StreamingPlayer } from '../components/media/StreamingPlayer'
+
+import { DetailsSkeleton } from '../components/ui/LoadingSkeleton'
+import { ErrorMessage } from '../components/ui/ErrorMessage'
+import { MediaRow } from '../components/media/MediaRow'
+import { PosterImage } from '../components/media/PosterImage'
+import { TrailerModal } from '../components/media/TrailerModal'
+import { WatchProviders } from '../components/media/WatchProviders'
 import { useFavourites } from '../hooks/useFavourites'
 import { useRequest } from '../hooks/useRequest'
+import type { MediaSource } from '../types/media-source'
 import type { MediaItem, MediaType, MovieDetails, TvDetails } from '../types/tmdb'
 import { backdropUrl } from '../utils/images'
 import {
@@ -35,7 +38,29 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   )
   const request = useRequest(loader)
   const [trailerOpen, setTrailerOpen] = useState(false)
+  const [playerOpen, setPlayerOpen] = useState(false)
+  const [mediaSources, setMediaSources] = useState<MediaSource[] | null>(null)
+  const [sourceError, setSourceError] = useState(false)
   const { isFavourite, toggleFavourite } = useFavourites()
+
+  useEffect(() => {
+    if (!validId) {
+      setMediaSources([])
+      return
+    }
+    const controller = new AbortController()
+    setMediaSources(null)
+    setSourceError(false)
+    getMediaSources(mediaType, id, controller.signal)
+      .then((response) => setMediaSources(response.sources))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setMediaSources([])
+        setSourceError(true)
+      })
+    return () => controller.abort()
+  }, [id, mediaType, validId])
+
 
   const data = request.data
   const item = useMemo<MediaItem | null>(() => {
@@ -56,7 +81,6 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
     }
   }, [data, mediaType])
 
-  if (!isTmdbConfigured) return <SetupMessage />
   if (request.loading) return <DetailsSkeleton />
   if (request.error || !data || !item) {
     return (
@@ -121,8 +145,30 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
             )}
 
             <div className="mt-7 flex flex-wrap justify-center gap-3 md:justify-start">
+              {mediaSources === null ? (
+                <span role="status" className="inline-flex min-h-12 items-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-400">
+                  Checking authorised playback…
+                </span>
+              ) : mediaSources.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlayerOpen(true)
+                    setTimeout(() => {
+                      document.getElementById('streaming-player')?.scrollIntoView({ behavior: 'smooth' })
+                    }, 100)
+                  }}
+                  className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-brand-400 px-5 font-black text-zinc-950 transition hover:bg-brand-500"
+                >
+                  <Play size={18} fill="currentColor" aria-hidden="true" />Watch authorised video
+                </button>
+              ) : null}
               {trailer && (
-                <button type="button" onClick={() => setTrailerOpen(true)} className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-white px-5 font-black text-zinc-950 transition hover:bg-zinc-200">
+                <button
+                  type="button"
+                  onClick={() => setTrailerOpen(true)}
+                  className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 bg-white/7 px-5 font-black text-white transition hover:bg-white/12"
+                >
                   <Play size={18} fill="currentColor" aria-hidden="true" />Watch trailer
                 </button>
               )}
@@ -136,11 +182,27 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                 {favourite ? 'Remove favourite' : 'Add to favourites'}
               </button>
             </div>
+            {mediaSources !== null && mediaSources.length === 0 && (
+              <p className="mt-3 text-sm text-zinc-500">
+                {sourceError
+                  ? 'Authorised playback availability could not be checked. Legal provider links remain below.'
+                  : 'No owned, licensed, or public-domain video is configured for in-app playback.'}
+              </p>
+            )}
           </div>
         </div>
       </div>
 
       <div className="mx-auto mt-14 max-w-7xl space-y-14 px-4 sm:px-6 lg:px-8">
+        {playerOpen && mediaSources && mediaSources.length > 0 && (
+          <StreamingPlayer
+            id={id}
+            mediaType={mediaType}
+            title={item.title}
+            numberOfSeasons={tv?.number_of_seasons}
+            sources={mediaSources}
+          />
+        )}
         <section aria-labelledby="cast-heading">
           <h2 id="cast-heading" className="mb-5 text-2xl font-black">Main cast</h2>
           <CastList cast={cast} />

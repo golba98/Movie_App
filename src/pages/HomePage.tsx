@@ -6,12 +6,10 @@ import {
   getTopRatedMovies,
   getTrendingMovies,
   getUpcomingMovies,
-  isTmdbConfigured,
 } from '../api/tmdb'
-import { Hero } from '../components/Hero'
-import { MediaRow } from '../components/MediaRow'
-import { SetupMessage } from '../components/SetupMessage'
-import { TrailerModal } from '../components/TrailerModal'
+import { Hero } from '../components/media/Hero'
+import { MediaRow } from '../components/media/MediaRow'
+import { TrailerModal } from '../components/media/TrailerModal'
 import { useRequest } from '../hooks/useRequest'
 import { chooseTrailer, normalizeMediaList } from '../utils/media'
 
@@ -37,8 +35,6 @@ export function HomePage() {
   const featuredDetails = useRequest(featuredLoader)
   const trailer = chooseTrailer(featuredDetails.data?.videos?.results)
   const [trailerOpen, setTrailerOpen] = useState(false)
-
-  if (!isTmdbConfigured) return <SetupMessage />
 
   return (
     <div className="min-w-0">

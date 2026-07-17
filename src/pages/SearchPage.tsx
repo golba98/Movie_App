@@ -1,12 +1,11 @@
 import { Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { isTmdbConfigured, searchMulti } from '../api/tmdb'
-import { ErrorMessage } from '../components/ErrorMessage'
-import { GridSkeleton } from '../components/LoadingSkeleton'
-import { MediaCard } from '../components/MediaCard'
-import { SearchBar } from '../components/SearchBar'
-import { SetupMessage } from '../components/SetupMessage'
+import { searchMulti } from '../api/tmdb'
+import { ErrorMessage } from '../components/ui/ErrorMessage'
+import { GridSkeleton } from '../components/ui/LoadingSkeleton'
+import { MediaCard } from '../components/media/MediaCard'
+import { SearchBar } from '../components/ui/SearchBar'
 import { useDebounce } from '../hooks/useDebounce'
 import type { MediaItem } from '../types/tmdb'
 import { normalizeMediaList } from '../utils/media'
@@ -25,7 +24,6 @@ export function SearchPage() {
   const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (!isTmdbConfigured) return
     controllerRef.current?.abort()
 
     if (!debouncedQuery) {
@@ -88,8 +86,6 @@ export function SearchPage() {
       if (!controller.signal.aborted) setLoadingMore(false)
     }
   }
-
-  if (!isTmdbConfigured) return <SetupMessage />
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-12 lg:px-8">

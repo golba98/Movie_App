@@ -1,6 +1,6 @@
-import type { MediaItem } from '../types/tmdb'
-import { ErrorMessage } from './ErrorMessage'
-import { CardSkeleton } from './LoadingSkeleton'
+import type { MediaItem } from '../../types/tmdb'
+import { ErrorMessage } from '../ui/ErrorMessage'
+import { CardSkeleton } from '../ui/LoadingSkeleton'
 import { MediaCard } from './MediaCard'
 
 export function MediaRow({
