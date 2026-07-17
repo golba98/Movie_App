@@ -477,8 +477,9 @@ export function StreamingPlayer({
                   <iframe
                     src={extractedUrl}
                     className={`block size-full border-0 bg-black object-contain transition-opacity duration-200 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
-                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen 'none'"
-                    sandbox="allow-scripts allow-same-origin allow-forms"
+                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                    allowFullScreen
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
                     aria-label={`Video player for ${title}`}
                     onLoad={revealIframe}
                   />

@@ -409,6 +409,16 @@ test('movie and TV details show metadata, legal providers, and persistent favour
   await expect(page.getByRole('heading', { name: 'Similar shows' })).toBeVisible()
 })
 
+test('omits the legal-provider section when South Africa has no providers', async ({ page }) => {
+  await page.unroute('**/api/tmdb/**')
+  await page.route('**/api/tmdb/movie/1', async (route) => {
+    await route.fulfill({ json: { ...movie, runtime: 166, ...detailsExtras, 'watch/providers': { results: {} } } })
+  })
+  await page.goto('/movie/1')
+  await expect(page.getByRole('heading', { name: 'Where it is legally available' })).toHaveCount(0)
+  await expect(page.getByText('TMDB has no legal watch-provider information for South Africa right now.')).toHaveCount(0)
+})
+
 test('@mobile browse pagination, invalid routes, and responsive layouts remain functional', async ({ page }, testInfo) => {
   await page.goto('/movies')
   await expect(page.getByRole('heading', { level: 1, name: 'Popular movies' })).toBeVisible()
@@ -790,9 +800,9 @@ test('dynamic players start inline, can expand to theater mode, and always leave
   await page.getByRole('button', { name: 'Retry player' }).click()
   const iframe = page.locator('#streaming-player iframe')
   await expect(iframe).toHaveAttribute('src', embedUrl)
-  await expect(iframe).not.toHaveAttribute('allowfullscreen', '')
-  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
-  await expect(iframe).toHaveAttribute('allow', "autoplay; encrypted-media; picture-in-picture; fullscreen 'none'")
+  await expect(iframe).toHaveAttribute('allowfullscreen', '')
+  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation')
+  await expect(iframe).toHaveAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen')
   await expect(page.getByRole('status')).toContainText('Loading player')
   expect(wrapperRequests).toBe(0)
 

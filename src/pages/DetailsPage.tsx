@@ -10,7 +10,7 @@ import { ErrorMessage } from '../components/ui/ErrorMessage'
 import { MediaRow } from '../components/media/MediaRow'
 import { PosterImage } from '../components/media/PosterImage'
 import { TrailerModal } from '../components/media/TrailerModal'
-import { WatchProviders } from '../components/media/WatchProviders'
+import { hasWatchProviders, WatchProviders } from '../components/media/WatchProviders'
 import { useFavourites } from '../hooks/useFavourites'
 import { useRequest } from '../hooks/useRequest'
 import type { MediaSource } from '../types/media-source'
@@ -160,6 +160,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const director = movie?.credits?.crew?.find((person) => person.job === 'Director')?.name
   const backdrop = item ? backdropUrl(item.backdropPath) : null
   const favourite = item ? isFavourite(item) : false
+  const watchProviders = data?.['watch/providers']?.results?.ZA
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4 sm:p-6 md:p-10">
@@ -324,13 +325,15 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                     <CastList cast={cast} />
                   </section>
 
-                  <section aria-labelledby="watch-heading">
-                    <div className="mb-5">
-                      <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-400">South Africa</p>
-                      <h2 id="watch-heading" className="mt-1 text-2xl font-black">Where it is legally available</h2>
-                    </div>
-                    <WatchProviders providers={data['watch/providers']?.results?.ZA} />
-                  </section>
+                  {hasWatchProviders(watchProviders) && (
+                    <section aria-labelledby="watch-heading">
+                      <div className="mb-5">
+                        <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-400">South Africa</p>
+                        <h2 id="watch-heading" className="mt-1 text-2xl font-black">Where it is legally available</h2>
+                      </div>
+                      <WatchProviders providers={watchProviders} />
+                    </section>
+                  )}
                 </div>
 
                 <div className="mt-14">

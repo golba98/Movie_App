@@ -3,16 +3,9 @@ import type { WatchProviderRegion } from '../../types/tmdb'
 import { providerLogoUrl } from '../../utils/images'
 import { dedupeProviders } from '../../utils/media'
 
-export function WatchProviders({ providers }: { providers?: WatchProviderRegion }) {
-  if (!providers) {
-    return (
-      <p className="rounded-2xl border border-white/8 bg-white/4 p-5 text-sm text-zinc-400">
-        TMDB has no legal watch-provider information for South Africa right now.
-      </p>
-    )
-  }
-
-  const groups = [
+function providerGroups(providers?: WatchProviderRegion) {
+  if (!providers) return []
+  return [
     {
       label: 'Stream, free or with ads',
       items: dedupeProviders([...(providers.flatrate ?? []), ...(providers.free ?? []), ...(providers.ads ?? [])]),
@@ -20,13 +13,18 @@ export function WatchProviders({ providers }: { providers?: WatchProviderRegion 
     { label: 'Rent', items: dedupeProviders(providers.rent) },
     { label: 'Buy', items: dedupeProviders(providers.buy) },
   ].filter((group) => group.items.length > 0)
+}
+
+export function hasWatchProviders(providers?: WatchProviderRegion) {
+  return providerGroups(providers).length > 0
+}
+
+export function WatchProviders({ providers }: { providers?: WatchProviderRegion }) {
+  if (!providers) return null
+  const groups = providerGroups(providers)
 
   if (groups.length === 0) {
-    return (
-      <p className="rounded-2xl border border-white/8 bg-white/4 p-5 text-sm text-zinc-400">
-        No legal streaming, rental, or purchase providers are listed for South Africa.
-      </p>
-    )
+    return null
   }
 
   return (
