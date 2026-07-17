@@ -562,7 +562,7 @@ test('does not claim in-app playback when no authorised source exists', async ({
   await expect(page.getByRole('button', { name: 'View video player' })).toBeVisible()
   await expect(page.locator('#streaming-player')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'No authorised source is available' })).toBeVisible()
-  await expect(page.getByText(/No owned, licensed, or public-domain video is configured/)).toBeVisible()
+  await expect(page.getByText(/No owned or licensed video is configured/)).toBeVisible()
 })
 
 test('capture compatibility start and stop never pauses or replaces the original video', async ({ page }) => {

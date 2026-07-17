@@ -1,7 +1,7 @@
 import type { MediaType } from './tmdb'
 
 export type MediaMimeType = 'video/mp4' | 'video/webm'
-export type RightsBasis = 'owned' | 'licensed' | 'public-domain'
+export type RightsBasis = 'owned' | 'licensed'
 
 export interface MediaSource {
   id: string
