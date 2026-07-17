@@ -835,3 +835,70 @@ test('dynamic players start inline, can expand to theater mode, and always leave
   await expect(page).toHaveURL(/\/$/)
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('')
 })
+
+test('player automatically falls back to the next available source if the first fails', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  
+  const source1 = {
+    id: 'server-one',
+    mediaType: 'movie',
+    tmdbId: 1,
+    seasonNumber: null,
+    episodeNumber: null,
+    label: 'Server One (Dynamic)',
+    sourceUrl: 'https://serverone.test/movie/1',
+    mimeType: 'video/mp4',
+    rightsBasis: 'licensed',
+    isDynamic: true,
+  }
+  
+  const source2 = {
+    id: 'server-two',
+    mediaType: 'movie',
+    tmdbId: 1,
+    seasonNumber: null,
+    episodeNumber: null,
+    label: 'Server Two (Dynamic)',
+    sourceUrl: 'https://servertwo.test/movie/1',
+    mimeType: 'video/mp4',
+    rightsBasis: 'licensed',
+    isDynamic: true,
+  }
+
+  const embedUrl = 'https://player.example.test/embed/movie/1'
+
+  await page.route('**/api/media-sources/movie/1', async (route) => {
+    await route.fulfill({ json: { data: { sources: [source1, source2] } } })
+  })
+
+  const extractionRequests: string[] = []
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    const urlParam = new URL(route.request().url()).searchParams.get('url') ?? ''
+    extractionRequests.push(urlParam)
+    if (urlParam.includes('serverone')) {
+      return route.fulfill({ json: { data: { extractedUrl: null } } })
+    }
+    return route.fulfill({ json: { data: { extractedUrl: embedUrl } } })
+  })
+
+  await page.route('https://player.example.test/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Test player</title>' })
+  })
+
+  await page.goto('/movie/1')
+  await expect(page.getByText('Start playback here, or use Theater mode for a larger view.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Play movie' }).click()
+
+  const iframe = page.locator('#streaming-player iframe')
+  await expect(iframe).toHaveAttribute('src', embedUrl)
+  
+  const activeSourceButton = page.locator('#streaming-player button', { hasText: 'Server Two' })
+  await expect(activeSourceButton).toHaveClass(/bg-emerald-500/)
+
+  expect(extractionRequests).toEqual([
+    'https://serverone.test/movie/1',
+    'https://servertwo.test/movie/1'
+  ])
+})
+
