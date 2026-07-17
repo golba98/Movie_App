@@ -258,7 +258,7 @@ export function AdminMediaSourceCatalog() {
           <input type="search" aria-label="Search authorised media" placeholder="Search title or TMDB ID" value={search} onChange={(event) => setSearch(event.target.value)} className="form-input pl-11" />
         </form>
       </div>
-      {loading ? <p role="status" className="mt-5 text-sm text-zinc-400">Loading authorised sources…</p> : sources.length ? <div className="mt-5 grid gap-4">{sources.map((source) => <SourceCard key={source.id} source={source} busy={busyId === source.id} onSave={save} onDelete={remove} />)}</div> : <p className="mt-5 rounded-3xl border border-white/8 p-7 text-center text-sm text-zinc-500">No authorised sources match this search.</p>}
+      {loading ? <p role="status" className="mt-5 text-sm text-zinc-400">Loading authorised sources…</p> : sources.length ? <div className="mt-5 grid gap-4">{sources.map((source) => <SourceCard key={source.id} source={source} busy={busyId === source.id} onSave={save} onDelete={remove} />)}</div> : null}
     </section>
   )
 }
