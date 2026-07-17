@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="F Movies">
+  <rect width="64" height="64" rx="14" fill="#ffffff" />
+  <path d="M22 14H44V22.5H31V28.5H41V37H31V50H22Z" fill="#000000" />
+</svg>

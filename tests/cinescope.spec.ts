@@ -261,7 +261,7 @@ async function mockTmdb(page: Page) {
     await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Trailer</title>' })
   })
   await page.route('**/test-media/capture-test.mp4*', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'video/mp4', body: '' })
+    await route.abort('aborted')
   })
   await page.route('**/api/tmdb/**', async (route) => {
     const url = new URL(route.request().url())
@@ -496,8 +496,7 @@ test('viewer login enforces the first-password-change flow', async ({ page }) =>
 
 test('plays only administrator-configured authorised media sources', async ({ page }) => {
   await page.goto('/movie/1')
-  await expect(page.locator('#streaming-player')).toBeHidden()
-
+  await expect(page.locator('#streaming-player')).toBeVisible()
   await page.getByRole('button', { name: 'Watch authorised video' }).click()
   const player = page.locator('#streaming-player')
   await expect(player).toBeVisible()
@@ -555,6 +554,9 @@ test('does not claim in-app playback when no authorised source exists', async ({
   })
   await page.goto('/movie/1')
   await expect(page.getByRole('button', { name: 'Watch authorised video' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'View video player' })).toBeVisible()
+  await expect(page.locator('#streaming-player')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No authorised source is available' })).toBeVisible()
   await expect(page.getByText(/No owned, licensed, or public-domain video is configured/)).toBeVisible()
 })
 

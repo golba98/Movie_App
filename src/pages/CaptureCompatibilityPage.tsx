@@ -45,10 +45,6 @@ export function CaptureCompatibilityPage() {
         audio: true,
       })
       streamRef.current = stream
-      if (previewRef.current) {
-        previewRef.current.srcObject = stream
-        await previewRef.current.play().catch(() => undefined)
-      }
       const videoTrack = stream.getVideoTracks()[0]
       const settings = videoTrack?.getSettings()
       setCaptureDetails([
@@ -63,6 +59,16 @@ export function CaptureCompatibilityPage() {
         setCaptureState('stopped')
         setCaptureDetails(null)
       }, { once: true })
+      if (previewRef.current) {
+        try {
+          previewRef.current.srcObject = stream
+          void previewRef.current.play().catch(() => {
+            setCaptureError('The display stream started, but this browser could not autoplay the local preview. Use the preview controls to start it manually.')
+          })
+        } catch {
+          setCaptureError('The display stream started, but this browser could not attach the local preview. The selected stream remains active.')
+        }
+      }
     } catch (error) {
       stopCapture('idle')
       if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError')) {
