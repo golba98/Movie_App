@@ -449,6 +449,32 @@ describe('authorised media-source catalog', () => {
       vi.unstubAllGlobals()
     }
   })
+
+  it('shares and caches concurrent player resolutions for the same source', async () => {
+    const { viewer } = await activeViewerCookies()
+    const sourceUrl = 'https://resolver.example.test/cacheable-title'
+    const outbound = vi.fn(async () => {
+      await Promise.resolve()
+      return new Response('<iframe src="https://player.example.test/cacheable"></iframe>', { status: 200 })
+    })
+    vi.stubGlobal('fetch', outbound)
+    try {
+      const path = `/api/media-sources/extract?url=${encodeURIComponent(sourceUrl)}`
+      const [first, second] = await Promise.all([
+        request(path, { cookie: viewer }),
+        request(path, { cookie: viewer }),
+      ])
+      expect(await first.json()).toEqual({ data: { extractedUrl: 'https://player.example.test/cacheable' } })
+      expect(await second.json()).toEqual({ data: { extractedUrl: 'https://player.example.test/cacheable' } })
+      expect(outbound).toHaveBeenCalledOnce()
+
+      const third = await request(path, { cookie: viewer })
+      expect(await third.json()).toEqual({ data: { extractedUrl: 'https://player.example.test/cacheable' } })
+      expect(outbound).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })
 
 describe('TMDB proxy boundary', () => {
