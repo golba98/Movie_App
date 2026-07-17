@@ -5,6 +5,7 @@ import {
   Maximize2,
   Minimize2,
   Play,
+  X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiRequest } from '../../api/client'
@@ -70,6 +71,7 @@ export function StreamingPlayer({
   const [dynamicPlayerStatus, setDynamicPlayerStatus] = useState<DynamicPlayerStatus>('idle')
   const [dynamicPlayerError, setDynamicPlayerError] = useState<string | null>(null)
   const [extractionAttempt, setExtractionAttempt] = useState(0)
+  const [inlinePlaybackRequested, setInlinePlaybackRequested] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const exitButtonRef = useRef<HTMLButtonElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
@@ -78,6 +80,7 @@ export function StreamingPlayer({
 
   useEffect(() => {
     setSelectedSourceId(null)
+    setInlinePlaybackRequested(false)
   }, [id, activeSeason, activeEpisode])
 
   useEffect(() => {
@@ -137,6 +140,7 @@ export function StreamingPlayer({
     return playableSources[0]
   }, [playableSources, selectedSourceId])
   const activeSourceIsDynamic = isDynamicSource(activeSource)
+  const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
 
   const availableSeasons = useMemo(() => {
     const hasDynamic = sources.some((source) => source.isDynamic)
@@ -172,7 +176,7 @@ export function StreamingPlayer({
   }, [activeSeason, id, mediaType])
 
   useEffect(() => {
-    if (!theaterMode || !activeSource || !activeSource.sourceUrl || !activeSourceIsDynamic) {
+    if (!dynamicPlaybackRequested || !activeSource || !activeSource.sourceUrl || !activeSourceIsDynamic) {
       setExtractedUrl(null)
       setDynamicPlayerStatus('idle')
       setDynamicPlayerError(null)
@@ -220,7 +224,7 @@ export function StreamingPlayer({
       window.clearTimeout(timeout)
       controller.abort()
     }
-  }, [activeSource, activeSourceIsDynamic, extractionAttempt, theaterMode])
+  }, [activeSource, activeSourceIsDynamic, dynamicPlaybackRequested, extractionAttempt])
 
 
 
@@ -290,6 +294,17 @@ export function StreamingPlayer({
               </h2>
             </div>
             <div className="flex items-center gap-2">
+              {activeSourceIsDynamic && inlinePlaybackRequested && !theaterMode && (
+                <button
+                  type="button"
+                  onClick={() => setInlinePlaybackRequested(false)}
+                  className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                  aria-label="Stop player"
+                  title="Stop player"
+                >
+                  <X size={17} aria-hidden="true" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onTheaterModeChange(true)}
@@ -309,7 +324,10 @@ export function StreamingPlayer({
                 <button
                   key={source.id}
                   type="button"
-                  onClick={() => setSelectedSourceId(source.id)}
+                  onClick={() => {
+                    setInlinePlaybackRequested(false)
+                    setSelectedSourceId(source.id)
+                  }}
                   className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 ${
                     activeSource?.id === source.id
                       ? 'bg-emerald-500/12 border border-emerald-400/30 text-emerald-300 shadow-md shadow-emerald-500/10'
@@ -343,7 +361,7 @@ export function StreamingPlayer({
               </button>
             )}
             {activeSourceIsDynamic ? (
-              !theaterMode ? (
+              !dynamicPlaybackRequested ? (
                 <div className="grid aspect-video size-full place-items-center bg-black px-6 text-center">
                   <div className="max-w-md">
                     <span className="mx-auto grid size-14 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300">
@@ -351,20 +369,27 @@ export function StreamingPlayer({
                     </span>
                     <h3 className="mt-4 text-base font-semibold text-white">Ready when you are</h3>
                     <p className="mt-2 text-sm leading-6 text-zinc-400">
-                      This external player loads only after you choose Watch or Theater mode.
+                      Start playback here, or use Theater mode for a larger view.
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => setInlinePlaybackRequested(true)}
+                      className="mt-5 min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
+                    >
+                      Play {mediaType === 'movie' ? 'movie' : 'episode'}
+                    </button>
                   </div>
                 </div>
               ) : dynamicPlayerStatus === 'ready' && extractedUrl ? (
                 <iframe
                   src={extractedUrl}
-                  className="block size-full border-0 bg-black object-contain"
+                  className={`block size-full border-0 bg-black object-contain ${theaterMode ? '' : 'aspect-video'}`}
                   allow="autoplay; encrypted-media; picture-in-picture"
                   sandbox="allow-scripts allow-same-origin allow-forms"
                   aria-label={`Video player for ${title}`}
                 />
               ) : dynamicPlayerStatus === 'error' ? (
-                <div className="grid size-full place-items-center bg-black px-6 text-center">
+                <div className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'aspect-video'}`}>
                   <div role="alert" className="max-w-md">
                     <span className="mx-auto grid size-14 place-items-center rounded-full border border-red-400/20 bg-red-400/10 text-red-200">
                       <AlertCircle aria-hidden="true" />
@@ -381,16 +406,19 @@ export function StreamingPlayer({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onTheaterModeChange(false)}
+                        onClick={() => {
+                          setInlinePlaybackRequested(false)
+                          onTheaterModeChange(false)
+                        }}
                         className="min-h-11 rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
                       >
-                        Exit player
+                        Stop player
                       </button>
                     </div>
                   </div>
                 </div>
               ) : (
-                <div role="status" className="grid size-full place-items-center bg-black px-6 text-center">
+                <div role="status" className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'aspect-video'}`}>
                   <div>
                     <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
                     <p className="mt-4 text-sm font-semibold text-zinc-300">Preparing player…</p>

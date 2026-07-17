@@ -709,7 +709,8 @@ test('the watch button opens a full-viewport theater player and Escape only exit
   expect(restoredBox?.width).toBeLessThan(1280)
 })
 
-test('dynamic players load only after Watch and always leave the site recoverable', async ({ page }) => {
+test('dynamic players start inline, can expand to theater mode, and always leave the site recoverable', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
   const wrapperUrl = 'https://flixbaba.mov/movie/1/dune-part-two/watch'
   const embedUrl = 'https://player.example.test/embed/movie/1'
   const dynamicSource = {
@@ -751,14 +752,13 @@ test('dynamic players load only after Watch and always leave the site recoverabl
   })
 
   await page.goto('/movie/1')
-  await expect(page.getByText('This external player loads only after you choose Watch or Theater mode.')).toBeVisible()
+  await expect(page.getByText('Start playback here, or use Theater mode for a larger view.')).toBeVisible()
   await expect(page.locator('#streaming-player iframe')).toHaveCount(0)
   expect(extractionRequests).toBe(0)
   expect(wrapperRequests).toBe(0)
 
-  await page.getByRole('button', { name: 'Watch Movie' }).click()
+  await page.getByRole('button', { name: 'Play movie' }).click()
   await expect(page.getByRole('status')).toContainText('Preparing player')
-  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeFocused()
   await expect(page.locator('#streaming-player iframe')).toHaveCount(0)
   await expect.poll(() => extractionRequests).toBe(1)
   expect(wrapperRequests).toBe(0)
@@ -774,11 +774,25 @@ test('dynamic players load only after Watch and always leave the site recoverabl
   await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
   expect(wrapperRequests).toBe(0)
 
+  const inlineBox = await iframe.boundingBox()
+  expect(inlineBox?.width).toBeLessThan(1280)
+
+  await page.getByRole('button', { name: 'Theater mode' }).click()
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeFocused()
+  const theaterBox = await iframe.boundingBox()
+  expect(theaterBox?.width).toBe(1280)
+  expect(theaterBox?.height).toBe(720)
+
   await page.keyboard.press('Escape')
-  await expect(iframe).toHaveCount(0)
-  await expect(page.getByText('This external player loads only after you choose Watch or Theater mode.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Watch Movie' })).toBeFocused()
+  await expect(iframe).toHaveCount(1)
+  const restoredBox = await iframe.boundingBox()
+  expect(restoredBox?.width).toBeLessThan(1280)
+  await expect(page.getByRole('button', { name: 'Theater mode' })).toBeFocused()
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('hidden')
+
+  await page.getByRole('button', { name: 'Stop player' }).click()
+  await expect(iframe).toHaveCount(0)
+  await expect(page.getByText('Start playback here, or use Theater mode for a larger view.')).toBeVisible()
 
   await page.getByRole('button', { name: 'Add to favourites' }).click()
   await expect(page.getByRole('button', { name: 'Remove favourite' })).toBeVisible()
