@@ -8,7 +8,7 @@ Fedora Movies is a private, account-based movie and TV application built with Re
 - Mandatory password change after first sign-in or an administrator reset
 - A separate `/admin` console for creating, searching, enabling, disabling, expiring, and maintaining viewer accounts
 - Administrator password resets, session revocation, and an audit log
-- An administrator-managed catalog of owned, licensed, or public-domain MP4/WebM sources
+- An administrator-managed catalog of direct owned or licensed MP4/WebM sources, plus optional dynamic third-party search providers
 - Account-synced favourites with a one-time import offer for older local favourites
 - A server-side, authenticated TMDB proxy so the TMDB token is never bundled into browser JavaScript
 - Movie and TV discovery, search, details, trailers, providers, cast, and episode browsing
@@ -16,7 +16,15 @@ Fedora Movies is a private, account-based movie and TV application built with Re
 - A signed-in `/capture-test` page for separating application playback faults from browser, GPU, Wayland, PipeWire, and protected-content capture faults
 - Isolated Worker/D1 tests plus Chromium, Firefox, Android, iPhone-profile, iPad-profile, responsive, and accessibility browser tests
 
-The production player uses a normal, persistent HTML5 `<video>` element and direct administrator-approved media URLs. Fedora Movies does not fetch, proxy, scrape, or bypass protection on arbitrary third-party streams. Only configure media that you own, license, or are authorised to distribute.
+The production player supports direct administrator-approved media URLs through a persistent HTML5 `<video>` element. Administrators may also configure optional dynamic providers that resolve an external embed only after a viewer explicitly presses **Watch**. Fedora Movies does not proxy the resulting media or attempt to bypass DRM, access controls, or copy protection.
+
+## Third-party content and copyright notice
+
+Fedora Movies does not create, upload, seed, copy, host, store, or redistribute movie and TV files. Optional dynamic providers use URLs and embed resources supplied by independent third-party services; those services control their own sites, catalogs, availability, and content.
+
+Some third-party services may contain material uploaded without the rightsholder's permission. This project does not control or endorse that material, and the presence of a provider integration is not a claim that every title it exposes is licensed or lawful in every jurisdiction. Administrators and viewers must only configure, access, or display content when they have the necessary permission and must comply with applicable laws and the third party's terms.
+
+This notice describes the project's technical role; it is not legal advice or a guarantee about any external source.
 
 ## Requirements
 
@@ -45,9 +53,11 @@ TMDB_ACCESS_TOKEN=your-tmdb-read-access-token
 
 Open the URL printed by Vite, then visit `/admin` to sign in and create the first viewer account. Viewer temporary passwords must be 12–128 characters and are never returned by the API or retained in the admin form.
 
-## Authorised video playback
+## Video playback
 
 Use the **Authorised media catalog** in `/admin` to associate a direct MP4 or WebM URL with a TMDB movie or TV episode. Sources may be a same-origin path or an HTTPS URL. A remote media host must provide a browser-compatible codec, correct content type, and byte-range support; Fedora Movies deliberately does not proxy remote video.
+
+Optional dynamic search providers are configured separately in `/admin`. The Worker checks the configured provider, resolves its external embed only after the viewer presses **Watch**, and returns an error if it cannot prepare the player within 15 seconds. The raw provider page is not embedded, and leaving theater mode destroys the iframe so the rest of the application remains usable.
 
 The player:
 
