@@ -5,11 +5,10 @@ export function Logo() {
   return (
     <Link
       to="/"
-      className="inline-flex items-center gap-2 rounded text-[15px] font-semibold tracking-tight text-[#f5f5f5] transition-colors hover:text-white"
-      aria-label="Fedora Movies home"
+      className="inline-flex items-center rounded text-[15px] text-[#f5f5f5] transition-colors hover:text-white"
+      aria-label="F Movies home"
     >
-      <BrandMark className="size-6 rounded-[0.4rem]" />
-      Fedora Movies
+      <BrandMark />
     </Link>
   )
 }

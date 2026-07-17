@@ -17,8 +17,8 @@ export function AuthLayout({ eyebrow, title, subtitle, children, footer }: AuthL
       <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 py-12">
         <section className="flex w-full max-w-[380px] flex-col">
           <div className="text-center">
-            <div className="mb-6 flex justify-center">
-              <BrandMark className="size-14 rounded-[1.15rem] shadow-[0_8px_40px_-8px_rgba(255,255,255,0.35)]" />
+            <div className="mb-7 flex justify-center">
+              <BrandMark className="text-[24px] text-white" />
             </div>
             <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{eyebrow}</p>
             <h1 className="mt-2 text-[30px] font-semibold leading-tight tracking-tight text-white">{title}</h1>
