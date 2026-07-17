@@ -1,5 +1,5 @@
-import { Film, Heart, Home, LogOut, Search, Shield, Tv } from 'lucide-react'
-import { Link, NavLink } from 'react-router'
+import { Film, Heart, Home, LogOut, Search, Tv } from 'lucide-react'
+import { NavLink } from 'react-router'
 import { useAuth } from '../../hooks/useAuth'
 import { Logo } from './Logo'
 
@@ -21,7 +21,6 @@ export function MobileNavigation() {
           <Logo />
           <div className="flex items-center gap-1">
             <span className="grid size-9 place-items-center rounded-full bg-white/10 text-sm font-semibold" aria-label={`Signed in as ${account?.displayName ?? 'viewer'}`}>{account?.displayName?.charAt(0).toUpperCase()}</span>
-            <Link to="/admin" aria-label="Open administrator console" className="grid size-11 place-items-center rounded-full text-zinc-400"><Shield size={17} aria-hidden="true" /></Link>
             <button type="button" onClick={() => void logout()} aria-label="Sign out" className="grid size-11 place-items-center rounded-full text-zinc-400"><LogOut size={18} aria-hidden="true" /></button>
           </div>
         </div>

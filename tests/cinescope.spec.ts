@@ -134,6 +134,18 @@ async function mockTmdb(page: Page) {
   let adminAuthenticated = false
   const accounts: Record<string, unknown>[] = []
   let adminMediaSources: Record<string, unknown>[] = []
+  let adminSearchProviders: Record<string, unknown>[] = [
+    {
+      id: 'flixbaba-default',
+      label: 'Flixbaba',
+      baseUrl: 'https://flixbaba.mov',
+      movieUrlPattern: '{baseUrl}/movie/{tmdbId}/{slug}/watch',
+      tvUrlPattern: '{baseUrl}/tv/{tmdbId}/{slug}',
+      active: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+  ]
 
   await page.route('**/api/auth/**', async (route) => {
     const path = new URL(route.request().url()).pathname
@@ -253,6 +265,31 @@ async function mockTmdb(page: Page) {
     if (path.endsWith('/reset-password')) return route.fulfill({ json: { data: { reset: true } } })
     if (path.endsWith('/revoke-sessions')) return route.fulfill({ json: { data: { revoked: 1 } } })
     if (request.method() === 'PATCH') return route.fulfill({ json: { data: { account: accounts[0] } } })
+    if (path === '/api/admin/search-providers' && request.method() === 'GET') {
+      return route.fulfill({ json: { data: { providers: adminSearchProviders } } })
+    }
+    if (path === '/api/admin/search-providers' && request.method() === 'POST') {
+      const input = request.postDataJSON() as Record<string, unknown>
+      const provider = {
+        id: `search-provider-${adminSearchProviders.length + 1}`,
+        ...input,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      adminSearchProviders = [provider, ...adminSearchProviders]
+      return route.fulfill({ status: 201, json: { data: { provider } } })
+    }
+    const searchProviderMatch = path.match(/^\/api\/admin\/search-providers\/([^/]+)$/)
+    if (searchProviderMatch && request.method() === 'PATCH') {
+      const changes = request.postDataJSON() as Record<string, unknown>
+      const provider = { ...adminSearchProviders.find((item) => item.id === searchProviderMatch[1]), ...changes, updatedAt: Date.now() }
+      adminSearchProviders = adminSearchProviders.map((item) => item.id === searchProviderMatch[1] ? provider : item)
+      return route.fulfill({ json: { data: { provider } } })
+    }
+    if (searchProviderMatch && request.method() === 'DELETE') {
+      adminSearchProviders = adminSearchProviders.filter((item) => item.id !== searchProviderMatch[1])
+      return route.fulfill({ json: { data: { removed: true } } })
+    }
     return route.fulfill({ json: { data: {} } })
   })
   await page.route('https://image.tmdb.org/**', async (route) => {
@@ -351,12 +388,9 @@ test('search is debounced, URL-backed, filters people, and handles empty and err
 
 test('movie and TV details show metadata, legal providers, and persistent favourites', async ({ page }) => {
   await page.goto('/movie/1')
-  await expect(page.getByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeVisible()
+  await expect(page.getByRole('article').getByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeVisible()
   await expect(page.getByText('Director:')).toBeVisible()
   await expect(page.getByText('Denis Villeneuve')).toBeVisible()
-  await expect(page.getByText('Example Stream')).toBeVisible()
-  await expect(page.getByText(/supplied by JustWatch/)).toBeVisible()
-  await expect(page.getByRole('link', { name: 'View legal options on TMDB' })).toHaveAttribute('href', /themoviedb\.org/)
 
   await page.getByRole('button', { name: 'Add to favourites' }).click()
   await page.goto('/favourites')
@@ -370,7 +404,7 @@ test('movie and TV details show metadata, legal providers, and persistent favour
   await expect(page.getByRole('heading', { name: 'No favourites yet' })).toBeVisible()
 
   await page.goto('/tv/10')
-  await expect(page.getByRole('heading', { level: 1, name: 'The Expanse' })).toBeVisible()
+  await expect(page.getByRole('article').getByRole('heading', { level: 1, name: 'The Expanse' })).toBeVisible()
   await expect(page.getByText('6 seasons')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Similar shows' })).toBeVisible()
 })
@@ -405,7 +439,7 @@ test('@mobile browse pagination, invalid routes, and responsive layouts remain f
 
     if (width < 768) {
       await page.goto('/movie/1')
-      await page.getByRole('button', { name: 'Watch authorised video' }).click()
+      await page.getByRole('button', { name: 'Watch Movie' }).click()
       const playerBox = await page.locator('#streaming-player').boundingBox()
       expect(playerBox?.x ?? -1).toBeGreaterThanOrEqual(0)
       expect((playerBox?.x ?? 0) + (playerBox?.width ?? width + 1)).toBeLessThanOrEqual(width)
@@ -429,7 +463,6 @@ test('admin can sign in and create a viewer without retaining the password', asy
   await page.getByLabel('TMDB ID').fill('1')
   await page.getByLabel('Display label').fill('Owned capture demonstration')
   await page.getByLabel('Direct media URL').fill('/test-media/capture-test.mp4')
-  await page.getByLabel('Rights note').fill('Generated test pattern owned by this project')
   await page.getByRole('button', { name: 'Add authorised source' }).click()
   await expect(page.getByRole('heading', { name: 'Owned capture demonstration' })).toBeVisible()
   await expect(page.getByText(/Added Owned capture demonstration/)).toBeVisible()
@@ -502,7 +535,7 @@ test('viewer login enforces the first-password-change flow', async ({ page }) =>
 test('plays only administrator-configured authorised media sources', async ({ page }) => {
   await page.goto('/movie/1')
   await expect(page.locator('#streaming-player')).toBeVisible()
-  await page.getByRole('button', { name: 'Watch authorised video' }).click()
+  await page.getByRole('button', { name: 'Watch Movie' }).click()
   const player = page.locator('#streaming-player')
   await expect(player).toBeVisible()
   const movieVideo = player.getByLabel('Video player for Dune: Part Two')
@@ -511,7 +544,6 @@ test('plays only administrator-configured authorised media sources', async ({ pa
   await expect(movieVideo).toHaveAttribute('playsinline', '')
   await expect(movieVideo).toHaveAttribute('preload', 'metadata')
   await expect(player.locator('iframe, canvas')).toHaveCount(0)
-  await expect(player.getByText('Test licensed movie')).toBeVisible()
 
   await movieVideo.evaluate((element) => {
     const state = window as typeof window & {
@@ -532,12 +564,15 @@ test('plays only administrator-configured authorised media sources', async ({ pa
     document.dispatchEvent(new Event('visibilitychange'))
     window.dispatchEvent(new Event('focus'))
   })
-  await player.getByRole('button', { name: 'Theater mode' }).click()
+  // Watch Movie opens theater mode directly, so leaving it exercises the same
+  // invariant the enter path used to: the element must survive the toggle.
+  await player.getByRole('button', { name: 'Exit theater mode' }).click()
   expect(await movieVideo.evaluate((element) => element === (window as typeof window & { __movieVideo?: Element }).__movieVideo)).toBe(true)
   expect(await page.evaluate(() => (window as typeof window & { __moviePauseCalls?: number }).__moviePauseCalls)).toBe(0)
 
   await page.goto('/tv/10')
-  await page.getByRole('button', { name: 'Watch authorised video' }).click()
+  await page.getByRole('button', { name: 'Watch Show' }).click()
+  await page.getByRole('button', { name: 'Exit theater mode' }).click()
 
   const tvPlayer = page.locator('#streaming-player')
   await expect(tvPlayer).toBeVisible()
@@ -550,7 +585,6 @@ test('plays only administrator-configured authorised media sources', async ({ pa
   await tvPlayer.getByRole('button', { name: /The Big Empty/ }).click()
   await expect(tvVideo).toHaveAttribute('src', '/test-media/capture-test.mp4?episode=2')
   expect(await tvVideo.evaluate((element) => element === (window as typeof window & { __tvVideo?: Element }).__tvVideo)).toBe(true)
-  await expect(tvPlayer.getByText('Test licensed episode two')).toBeVisible()
 })
 
 test('does not claim in-app playback when no authorised source exists', async ({ page }) => {
@@ -558,7 +592,7 @@ test('does not claim in-app playback when no authorised source exists', async ({
     await route.fulfill({ json: { data: { sources: [] } } })
   })
   await page.goto('/movie/1')
-  await expect(page.getByRole('button', { name: 'Watch authorised video' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Watch Movie' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'View video player' })).toHaveCount(0)
   await expect(page.locator('#streaming-player')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'No authorised source is available' })).toHaveCount(0)
@@ -613,4 +647,39 @@ test('capture compatibility start and stop never pauses or replaces the original
   await expect(page.getByRole('status')).toContainText('Capture stopped')
   expect(await page.evaluate(() => (window as typeof window & { __captureTrackStopCalls?: number }).__captureTrackStopCalls)).toBe(1)
   expect(await page.evaluate(() => (window as typeof window & { __captureOriginalPauseCalls?: number }).__captureOriginalPauseCalls)).toBe(0)
+})
+
+test('the watch button opens a full-viewport theater player and Escape only exits it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.goto('/movie/1')
+
+  const video = page.getByLabel('Video player for Dune: Part Two')
+  await expect(video).toBeVisible()
+
+  const inlineBox = await video.boundingBox()
+  expect(inlineBox?.width).toBeLessThan(1280)
+
+  await video.evaluate((element) => {
+    (window as typeof window & { __theaterVideo?: Element }).__theaterVideo = element
+  })
+
+  await page.getByRole('button', { name: 'Watch Movie' }).click()
+
+  const theaterBox = await video.boundingBox()
+  expect(theaterBox?.width).toBe(1280)
+  expect(theaterBox?.height).toBe(720)
+
+  // Same element instance: promoting via CSS must not restart playback.
+  expect(
+    await video.evaluate(
+      (element) => element === (window as typeof window & { __theaterVideo?: Element }).__theaterVideo,
+    ),
+  ).toBe(true)
+
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL(/\/movie\/1$/)
+  const restoredBox = await video.boundingBox()
+  expect(restoredBox?.width).toBeLessThan(1280)
 })

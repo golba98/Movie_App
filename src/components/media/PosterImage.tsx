@@ -1,11 +1,16 @@
 import { Film } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { posterUrl } from '../../utils/images'
 
 export function PosterImage({ path, title }: { path: string | null; title: string }) {
   const source = posterUrl(path)
   const [failedSource, setFailedSource] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const failed = source === failedSource
+
+  useEffect(() => {
+    setLoaded(false)
+  }, [path])
 
   if (!source || failed) {
     return (
@@ -26,7 +31,8 @@ export function PosterImage({ path, title }: { path: string | null; title: strin
       alt={`${title} poster`}
       loading="lazy"
       decoding="async"
-      className="size-full object-cover"
+      className={`size-full object-cover transition-opacity duration-300 ease-out ${loaded ? 'opacity-100' : 'opacity-0'}`}
+      onLoad={() => setLoaded(true)}
       onError={() => setFailedSource(source)}
     />
   )

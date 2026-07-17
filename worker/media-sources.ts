@@ -46,6 +46,7 @@ function publicMediaSource(row: MediaSourceRow, includeAdminFields = false) {
     sourceUrl: row.source_url,
     mimeType: row.mime_type,
     rightsBasis: row.rights_basis,
+    isDynamic: false as boolean | undefined,
     ...(includeAdminFields
       ? {
           rightsNote: row.rights_note,
@@ -85,9 +86,11 @@ function cleanMediaSource(input: MediaSourceInput) {
   const mimeType = input.mimeType === 'video/mp4' || input.mimeType === 'video/webm'
     ? input.mimeType
     : null
-  const rightsBasis = input.rightsBasis === 'owned' || input.rightsBasis === 'licensed'
-    ? input.rightsBasis
-    : null
+  const rightsBasis = input.rightsBasis === undefined
+    ? 'licensed'
+    : (input.rightsBasis === 'owned' || input.rightsBasis === 'licensed' || input.rightsBasis === 'public-domain'
+      ? input.rightsBasis
+      : null)
   const rightsNote = typeof input.rightsNote === 'string' ? input.rightsNote.trim().slice(0, 500) : ''
   const active = input.active === undefined ? true : input.active
 
@@ -153,7 +156,19 @@ async function fetchTmdbTitle(env: Env, mediaType: string, tmdbId: number): Prom
   return title ?? ''
 }
 
-async function checkFlixbabaAvailability(url: string): Promise<boolean> {
+
+function buildProviderUrl(pattern: string, baseUrl: string, tmdbId: number, slug: string) {
+  let url = pattern
+  if (!url) {
+    url = '{baseUrl}/movie/{tmdbId}/{slug}/watch'
+  }
+  return url
+    .replace(/{baseUrl}/g, baseUrl)
+    .replace(/{tmdbId}/g, String(tmdbId))
+    .replace(/{slug}/g, slug)
+}
+
+async function checkUrlAvailability(url: string): Promise<boolean> {
   try {
     const res = await fetch(url, {
       method: 'GET',
@@ -191,51 +206,50 @@ export async function listMediaSourcesForViewer(
   
   const sources = rows.results.map((row) => publicMediaSource(row))
 
-  let dynamicSource: {
-    id: string
-    mediaType: MediaType
-    tmdbId: number
-    seasonNumber: number | null
-    episodeNumber: number | null
-    label: string
-    sourceUrl: string
-    mimeType: MediaMimeType
-    rightsBasis: RightsBasis
-  } | null = null
-
   if (env.TMDB_ACCESS_TOKEN && env.TMDB_ACCESS_TOKEN !== 'unit-test-tmdb-token') {
     try {
-      const title = await fetchTmdbTitle(env, mediaType, tmdbId)
-      if (title) {
-        const slug = slugify(title)
-        const flixbabaUrl = mediaType === 'movie'
-          ? `https://flixbaba.mov/movie/${tmdbId}/${slug}/watch`
-          : `https://flixbaba.mov/tv/${tmdbId}/${slug}`
-        
-        const isAvailable = await checkFlixbabaAvailability(flixbabaUrl)
-        if (isAvailable) {
-          dynamicSource = {
-            id: 'flixbaba',
-            mediaType,
-            tmdbId,
-            seasonNumber: null,
-            episodeNumber: null,
-            label: 'Flixbaba Stream (Dynamic)',
-            sourceUrl: flixbabaUrl,
-            mimeType: 'video/mp4',
-            rightsBasis: 'licensed',
+      const providersResult = await env.DB
+        .prepare('SELECT * FROM search_providers WHERE is_active = 1 ORDER BY created_at ASC')
+        .all<SearchProviderRow>()
+      
+      if (providersResult.results.length > 0) {
+        const title = await fetchTmdbTitle(env, mediaType, tmdbId)
+        if (title) {
+          const slug = slugify(title)
+          const providersToCheck = providersResult.results.map((provider) => {
+            const pattern = mediaType === 'movie' ? provider.movie_url_pattern : provider.tv_url_pattern
+            const providerUrl = buildProviderUrl(pattern, provider.base_url, tmdbId, slug)
+            return { provider, providerUrl }
+          })
+          
+          const checks = await Promise.all(
+            providersToCheck.map(async ({ provider, providerUrl }) => {
+              const isAvailable = await checkUrlAvailability(providerUrl)
+              return { provider, providerUrl, isAvailable }
+            })
+          )
+          
+          for (const { provider, providerUrl, isAvailable } of checks) {
+            if (isAvailable) {
+              sources.push({
+                id: provider.id,
+                mediaType,
+                tmdbId,
+                seasonNumber: null,
+                episodeNumber: null,
+                label: `${provider.label} Stream (Dynamic)`,
+                sourceUrl: providerUrl,
+                mimeType: 'video/mp4',
+                rightsBasis: 'licensed',
+                isDynamic: true,
+              })
+            }
           }
         }
       }
     } catch (e) {
-      console.error('Flixbaba check failed:', e)
+      console.error('Dynamic search provider check failed:', e)
     }
-  }
-
-
-
-  if (dynamicSource) {
-    sources.push(dynamicSource)
   }
 
   return json({ sources })
@@ -372,7 +386,8 @@ export async function deleteMediaSource(request: Request, env: Env, id: string) 
 
 async function extractDirectPlayerUrl(url: string): Promise<string | null> {
   // Direct parsing for known dynamic hosts to avoid failing on client-side JS pages or 404 wrappers
-  if (url.includes('flixbaba')) {
+  const isDynamicHost = url.includes('flixbaba') || url.includes('soap2day')
+  if (isDynamicHost) {
     const movieMatch = url.match(/\/movie\/(\d+)/)
     const tvMatch = url.match(/\/tv\/(\d+)/)
     if (movieMatch && !url.includes('/season/')) {
@@ -382,13 +397,20 @@ async function extractDirectPlayerUrl(url: string): Promise<string | null> {
       const tmdbId = tvMatch[1]
       const seasonMatch = url.match(/\/season\/(\d+)/)
       const season = seasonMatch ? seasonMatch[1] : '1'
+      
+      let episode = '1'
       try {
         const parsed = new URL(url)
-        const episode = parsed.searchParams.get('e') || '1'
-        return `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`
+        episode = parsed.searchParams.get('e') || parsed.searchParams.get('episode') || '1'
+        if (episode === '1') {
+          const epMatch = url.match(/\/episode\/(\d+)/)
+          if (epMatch) episode = epMatch[1]
+        }
       } catch {
-        return `https://vidsrc.to/embed/tv/${tmdbId}/${season}/1`
+        const epMatch = url.match(/\/episode\/(\d+)/)
+        if (epMatch) episode = epMatch[1]
       }
+      return `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`
     }
   }
 
@@ -448,4 +470,141 @@ export async function extractStreamEndpoint(request: Request, env: Env) {
 
   const extractedUrl = await extractDirectPlayerUrl(cleanedUrl)
   return json({ extractedUrl })
+}
+
+interface SearchProviderRow {
+  id: string
+  label: string
+  base_url: string
+  movie_url_pattern: string
+  tv_url_pattern: string
+  is_active: number
+  created_at: number
+  updated_at: number
+}
+
+interface SearchProviderInput {
+  label?: unknown
+  baseUrl?: unknown
+  movieUrlPattern?: unknown
+  tvUrlPattern?: unknown
+  active?: unknown
+}
+
+function cleanSearchProvider(input: SearchProviderInput) {
+  const fieldErrors: Record<string, string> = {}
+  const label = typeof input.label === 'string' ? input.label.trim().slice(0, 160) : ''
+  const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl.trim().slice(0, 500) : ''
+  const movieUrlPattern = typeof input.movieUrlPattern === 'string' ? input.movieUrlPattern.trim().slice(0, 500) : ''
+  const tvUrlPattern = typeof input.tvUrlPattern === 'string' ? input.tvUrlPattern.trim().slice(0, 500) : ''
+  const active = input.active === undefined ? true : input.active
+
+  if (!label) fieldErrors.label = 'Enter a label.'
+  if (!baseUrl) fieldErrors.baseUrl = 'Enter a base URL.'
+  if (typeof active !== 'boolean') fieldErrors.active = 'Active must be true or false.'
+
+  if (Object.keys(fieldErrors).length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Check search provider fields.', fieldErrors)
+  }
+
+  return {
+    label,
+    baseUrl,
+    movieUrlPattern,
+    tvUrlPattern,
+    active,
+  }
+}
+
+function publicSearchProvider(row: SearchProviderRow) {
+  return {
+    id: row.id,
+    label: row.label,
+    baseUrl: row.base_url,
+    movieUrlPattern: row.movie_url_pattern,
+    tvUrlPattern: row.tv_url_pattern,
+    active: row.is_active === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+export async function listSearchProvidersForAdmin(request: Request, env: Env) {
+  await requireAdmin(request, env.DB)
+  const rows = await env.DB
+    .prepare('SELECT * FROM search_providers ORDER BY updated_at DESC')
+    .all<SearchProviderRow>()
+  return json({ providers: rows.results.map((row) => publicSearchProvider(row)) })
+}
+
+export async function createSearchProvider(request: Request, env: Env) {
+  await requireAdmin(request, env.DB)
+  const provider = cleanSearchProvider(await readJson<SearchProviderInput>(request))
+  const id = crypto.randomUUID()
+  const now = Date.now()
+  await env.DB
+    .prepare(
+      `INSERT INTO search_providers
+        (id, label, base_url, movie_url_pattern, tv_url_pattern, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      id,
+      provider.label,
+      provider.baseUrl,
+      provider.movieUrlPattern,
+      provider.tvUrlPattern,
+      provider.active ? 1 : 0,
+      now,
+      now,
+    )
+    .run()
+
+  await auditAdminEvent(request, env, 'search_provider.create', null, { searchProviderId: id, label: provider.label })
+  const created = await env.DB.prepare('SELECT * FROM search_providers WHERE id = ?').bind(id).first<SearchProviderRow>()
+  return json({ provider: publicSearchProvider(created!) }, 201)
+}
+
+export async function updateSearchProvider(request: Request, env: Env, id: string) {
+  await requireAdmin(request, env.DB)
+  const current = await env.DB.prepare('SELECT * FROM search_providers WHERE id = ?').bind(id).first<SearchProviderRow>()
+  if (!current) throw new ApiError(404, 'PROVIDER_NOT_FOUND', 'Search provider not found.')
+  const changes = await readJson<SearchProviderInput>(request)
+  const provider = cleanSearchProvider({
+    label: current.label,
+    baseUrl: current.base_url,
+    movieUrlPattern: current.movie_url_pattern,
+    tvUrlPattern: current.tv_url_pattern,
+    active: current.is_active === 1,
+    ...changes,
+  })
+  await env.DB
+    .prepare(
+      `UPDATE search_providers SET
+        label = ?, base_url = ?, movie_url_pattern = ?, tv_url_pattern = ?, is_active = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+    .bind(
+      provider.label,
+      provider.baseUrl,
+      provider.movieUrlPattern,
+      provider.tvUrlPattern,
+      provider.active ? 1 : 0,
+      Date.now(),
+      id,
+    )
+    .run()
+
+  await auditAdminEvent(request, env, 'search_provider.update', null, { searchProviderId: id, label: provider.label })
+  const updated = await env.DB.prepare('SELECT * FROM search_providers WHERE id = ?').bind(id).first<SearchProviderRow>()
+  return json({ provider: publicSearchProvider(updated!) })
+}
+
+export async function deleteSearchProvider(request: Request, env: Env, id: string) {
+  await requireAdmin(request, env.DB)
+  const current = await env.DB.prepare('SELECT * FROM search_providers WHERE id = ?').bind(id).first<SearchProviderRow>()
+  if (!current) throw new ApiError(404, 'PROVIDER_NOT_FOUND', 'Search provider not found.')
+  await env.DB.prepare('DELETE FROM search_providers WHERE id = ?').bind(id).run()
+  await auditAdminEvent(request, env, 'search_provider.delete', null, { searchProviderId: id, label: current.label })
+  return json({ removed: true })
 }

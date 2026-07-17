@@ -1,4 +1,4 @@
-import type { AdminMediaSource, MediaSource, MediaSourceInput } from '../types/media-source'
+import type { AdminMediaSource, MediaSource, MediaSourceInput, SearchProvider, SearchProviderInput } from '../types/media-source'
 import type { MediaType } from '../types/tmdb'
 import { apiRequest } from './client'
 
@@ -28,6 +28,30 @@ export function updateAdminMediaSource(id: string, source: Partial<MediaSourceIn
 
 export function deleteAdminMediaSource(id: string) {
   return apiRequest<{ removed: boolean }>(`/api/admin/media-sources/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function getAdminSearchProviders() {
+  return apiRequest<{ providers: SearchProvider[] }>('/api/admin/search-providers')
+}
+
+export function createAdminSearchProvider(provider: SearchProviderInput) {
+  return apiRequest<{ provider: SearchProvider }>('/api/admin/search-providers', {
+    method: 'POST',
+    body: JSON.stringify(provider),
+  })
+}
+
+export function updateAdminSearchProvider(id: string, provider: Partial<SearchProviderInput>) {
+  return apiRequest<{ provider: SearchProvider }>(`/api/admin/search-providers/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(provider),
+  })
+}
+
+export function deleteAdminSearchProvider(id: string) {
+  return apiRequest<{ removed: boolean }>(`/api/admin/search-providers/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
 }

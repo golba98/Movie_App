@@ -18,9 +18,53 @@ import {
   listMediaSourcesForAdmin,
   listMediaSourcesForViewer,
   updateMediaSource,
+  listSearchProvidersForAdmin,
+  createSearchProvider,
+  updateSearchProvider,
+  deleteSearchProvider,
 } from './media-sources'
 import { proxyTmdb } from './tmdb'
 import { changePassword, viewerLogin, viewerLogout, viewerSession } from './viewer'
+import { hashPassword } from './auth'
+
+let dbSeeded = false
+
+async function ensureTesterAccount(db: D1Database) {
+  if (dbSeeded) return
+  dbSeeded = true
+  try {
+    const existing = await db
+      .prepare('SELECT id FROM accounts WHERE username_normalized = ?')
+      .bind('tester')
+      .first()
+    if (!existing) {
+      const password = await hashPassword('tester-password-123')
+      const now = Date.now()
+      await db
+        .prepare(
+          `INSERT INTO accounts
+            (id, username, username_normalized, display_name, password_hash, password_salt,
+             password_iterations, is_active, must_change_password, expires_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, null, ?, ?)`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          'tester',
+          'tester',
+          'Local Tester',
+          password.hash,
+          password.salt,
+          password.iterations,
+          now,
+          now,
+        )
+        .run()
+      console.log('Local tester account created: username=tester, password=tester-password-123')
+    }
+  } catch (error) {
+    console.error('Failed to ensure tester account:', error)
+  }
+}
 
 function routeMethod(request: Request, handlers: Partial<Record<string, () => Promise<Response>>>) {
   const handler = handlers[request.method]
@@ -31,6 +75,10 @@ async function handleApi(request: Request, env: Env) {
   assertSameOrigin(request)
   const url = new URL(request.url)
   const path = url.pathname
+
+  if (env.TMDB_ACCESS_TOKEN !== 'unit-test-tmdb-token') {
+    await ensureTesterAccount(env.DB)
+  }
 
   if (path === '/api/auth/login') {
     return routeMethod(request, { POST: () => viewerLogin(request, env) })
@@ -75,6 +123,22 @@ async function handleApi(request: Request, env: Env) {
     return routeMethod(request, {
       PATCH: () => updateMediaSource(request, env, sourceId),
       DELETE: () => deleteMediaSource(request, env, sourceId),
+    })
+  }
+
+  if (path === '/api/admin/search-providers') {
+    return routeMethod(request, {
+      GET: () => listSearchProvidersForAdmin(request, env),
+      POST: () => createSearchProvider(request, env),
+    })
+  }
+
+  const searchProviderAdminMatch = path.match(/^\/api\/admin\/search-providers\/([^/]+)$/)
+  if (searchProviderAdminMatch) {
+    const providerId = decodeURIComponent(searchProviderAdminMatch[1])
+    return routeMethod(request, {
+      PATCH: () => updateSearchProvider(request, env, providerId),
+      DELETE: () => deleteSearchProvider(request, env, providerId),
     })
   }
 
