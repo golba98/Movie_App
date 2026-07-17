@@ -14,6 +14,31 @@ import type { MediaSource } from '../../types/media-source'
 import type { Episode, MediaType } from '../../types/tmdb'
 import { imageUrl } from '../../utils/images'
 
+const EXTRACTION_TIMEOUT_MS = 15_000
+
+type DynamicPlayerStatus = 'idle' | 'extracting' | 'ready' | 'error'
+
+function isDynamicSource(source: MediaSource | undefined) {
+  if (!source) return false
+  const sourceUrl = source.sourceUrl.toLowerCase()
+  return Boolean(source.isDynamic || sourceUrl.includes('flixbaba') || sourceUrl.includes('soap2day'))
+}
+
+function isEmbeddableUrl(candidate: string | null, wrapperUrl: string) {
+  if (!candidate) return false
+  try {
+    const extracted = new URL(candidate)
+    const wrapper = new URL(wrapperUrl, window.location.origin)
+    const hostname = extracted.hostname.toLowerCase()
+    return extracted.protocol === 'https:'
+      && extracted.href !== wrapper.href
+      && !hostname.includes('flixbaba')
+      && !hostname.includes('soap2day')
+  } catch {
+    return false
+  }
+}
+
 interface StreamingPlayerProps {
   id: number
   mediaType: MediaType
@@ -42,8 +67,12 @@ export function StreamingPlayer({
   const [episodesError, setEpisodesError] = useState<string | null>(null)
   const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
   const [extractedUrl, setExtractedUrl] = useState<string | null>(null)
-  const [isExtracting, setIsExtracting] = useState(false)
+  const [dynamicPlayerStatus, setDynamicPlayerStatus] = useState<DynamicPlayerStatus>('idle')
+  const [dynamicPlayerError, setDynamicPlayerError] = useState<string | null>(null)
+  const [extractionAttempt, setExtractionAttempt] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const exitButtonRef = useRef<HTMLButtonElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
 
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
 
@@ -53,15 +82,21 @@ export function StreamingPlayer({
 
   useEffect(() => {
     if (!theaterMode) return
+    returnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onTheaterModeChange(false)
     }
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', onKeyDown)
+    exitButtonRef.current?.focus()
     return () => {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', onKeyDown)
+      if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus()
+      returnFocusRef.current = null
     }
   }, [theaterMode, onTheaterModeChange])
 
@@ -101,6 +136,7 @@ export function StreamingPlayer({
     }
     return playableSources[0]
   }, [playableSources, selectedSourceId])
+  const activeSourceIsDynamic = isDynamicSource(activeSource)
 
   const availableSeasons = useMemo(() => {
     const hasDynamic = sources.some((source) => source.isDynamic)
@@ -136,40 +172,55 @@ export function StreamingPlayer({
   }, [activeSeason, id, mediaType])
 
   useEffect(() => {
-    if (!activeSource || !activeSource.sourceUrl) {
+    if (!theaterMode || !activeSource || !activeSource.sourceUrl || !activeSourceIsDynamic) {
       setExtractedUrl(null)
-      setIsExtracting(false)
-      return
-    }
-
-    const isIframe = activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') || activeSource.isDynamic
-    if (!isIframe) {
-      setExtractedUrl(null)
-      setIsExtracting(false)
+      setDynamicPlayerStatus('idle')
+      setDynamicPlayerError(null)
       return
     }
 
     const controller = new AbortController()
-    setIsExtracting(true)
+    let timedOut = false
+    const timeout = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, EXTRACTION_TIMEOUT_MS)
+
+    setDynamicPlayerStatus('extracting')
+    setDynamicPlayerError(null)
     setExtractedUrl(null)
 
     apiRequest<{ extractedUrl: string | null }>(
       `/api/media-sources/extract?url=${encodeURIComponent(activeSource.sourceUrl)}`,
-      { signal: controller.signal }
+      { signal: controller.signal },
     )
       .then((data) => {
-        setExtractedUrl(data.extractedUrl ?? activeSource.sourceUrl)
-        setIsExtracting(false)
+        window.clearTimeout(timeout)
+        if (!isEmbeddableUrl(data.extractedUrl, activeSource.sourceUrl)) {
+          setDynamicPlayerStatus('error')
+          setDynamicPlayerError('This source did not return a usable embedded player. You can retry or exit safely.')
+          return
+        }
+        setExtractedUrl(data.extractedUrl)
+        setDynamicPlayerStatus('ready')
       })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        console.error('Extractor failed:', err)
-        setExtractedUrl(activeSource.sourceUrl)
-        setIsExtracting(false)
+      .catch((error: unknown) => {
+        window.clearTimeout(timeout)
+        if (controller.signal.aborted && !timedOut) return
+        if (!timedOut) console.error('Extractor failed:', error)
+        setDynamicPlayerStatus('error')
+        setDynamicPlayerError(
+          timedOut
+            ? 'The player took too long to prepare. You can retry or exit safely.'
+            : 'The player could not be prepared. You can retry or exit safely.',
+        )
       })
 
-    return () => controller.abort()
-  }, [activeSource])
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [activeSource, activeSourceIsDynamic, extractionAttempt, theaterMode])
 
 
 
@@ -282,6 +333,7 @@ export function StreamingPlayer({
           >
             {theaterMode && (
               <button
+                ref={exitButtonRef}
                 type="button"
                 onClick={() => onTheaterModeChange(false)}
                 className="absolute right-4 top-4 z-20 grid size-11 place-items-center rounded-full bg-black/70 text-zinc-200 ring-1 ring-white/15 backdrop-blur transition hover:bg-black/90 hover:text-white"
@@ -290,20 +342,61 @@ export function StreamingPlayer({
                 <Minimize2 size={18} aria-hidden="true" />
               </button>
             )}
-            {isExtracting && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/85 backdrop-blur-sm transition-all duration-300">
-                <div className="size-8 rounded-full border border-white/10 border-t-white animate-spin" />
-              </div>
-            )}
-            {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') || activeSource.isDynamic ? (
-              <iframe
-                src={extractedUrl ?? activeSource.sourceUrl}
-                className={`block size-full border-0 bg-black object-contain ${theaterMode ? '' : 'aspect-video'}`}
-                allowFullScreen
-                allow="autoplay; encrypted-media; picture-in-picture"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
-                aria-label={`Video player for ${title}`}
-              />
+            {activeSourceIsDynamic ? (
+              !theaterMode ? (
+                <div className="grid aspect-video size-full place-items-center bg-black px-6 text-center">
+                  <div className="max-w-md">
+                    <span className="mx-auto grid size-14 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300">
+                      <Play size={20} fill="currentColor" aria-hidden="true" />
+                    </span>
+                    <h3 className="mt-4 text-base font-semibold text-white">Ready when you are</h3>
+                    <p className="mt-2 text-sm leading-6 text-zinc-400">
+                      This external player loads only after you choose Watch or Theater mode.
+                    </p>
+                  </div>
+                </div>
+              ) : dynamicPlayerStatus === 'ready' && extractedUrl ? (
+                <iframe
+                  src={extractedUrl}
+                  className="block size-full border-0 bg-black object-contain"
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  sandbox="allow-scripts allow-same-origin allow-forms"
+                  aria-label={`Video player for ${title}`}
+                />
+              ) : dynamicPlayerStatus === 'error' ? (
+                <div className="grid size-full place-items-center bg-black px-6 text-center">
+                  <div role="alert" className="max-w-md">
+                    <span className="mx-auto grid size-14 place-items-center rounded-full border border-red-400/20 bg-red-400/10 text-red-200">
+                      <AlertCircle aria-hidden="true" />
+                    </span>
+                    <h3 className="mt-4 text-lg font-semibold text-white">Player unavailable</h3>
+                    <p className="mt-2 text-sm leading-6 text-zinc-400">{dynamicPlayerError}</p>
+                    <div className="mt-5 flex flex-wrap justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setExtractionAttempt((attempt) => attempt + 1)}
+                        className="min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
+                      >
+                        Retry player
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onTheaterModeChange(false)}
+                        className="min-h-11 rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
+                      >
+                        Exit player
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div role="status" className="grid size-full place-items-center bg-black px-6 text-center">
+                  <div>
+                    <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
+                    <p className="mt-4 text-sm font-semibold text-zinc-300">Preparing player…</p>
+                  </div>
+                </div>
+              )
             ) : (
               <video
                 ref={videoRef}
