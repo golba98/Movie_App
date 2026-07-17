@@ -10,6 +10,7 @@ import { ErrorMessage } from '../components/ui/ErrorMessage'
 import { MediaRow } from '../components/media/MediaRow'
 import { PosterImage } from '../components/media/PosterImage'
 import { TrailerModal } from '../components/media/TrailerModal'
+import { WatchProviders } from '../components/media/WatchProviders'
 import { useFavourites } from '../hooks/useFavourites'
 import { useRequest } from '../hooks/useRequest'
 import type { MediaSource } from '../types/media-source'
@@ -260,24 +261,16 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                           <span role="status" className="inline-flex min-h-12 items-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-400">
                             Checking authorised playback…
                           </span>
-                        ) : (
+                        ) : mediaSources.length > 0 ? (
                           <button
                             type="button"
-                            onClick={() => {
-                              if (mediaSources.length > 0) {
-                                setTheaterMode(true)
-                                return
-                              }
-                              document.getElementById('streaming-player')?.scrollIntoView({ behavior: 'smooth' })
-                            }}
+                            onClick={() => setTheaterMode(true)}
                             className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-brand-400 px-5 font-black text-zinc-950 transition hover:bg-brand-500"
                           >
                             <Play size={18} fill="currentColor" aria-hidden="true" />
-                            {mediaSources.length > 0
-                              ? (mediaType === 'movie' ? 'Watch Movie' : 'Watch Show')
-                              : 'View video player'}
+                            Watch {mediaType === 'movie' ? 'Movie' : 'Show'}
                           </button>
-                        )}
+                        ) : null}
                         {trailer && (
                           <button
                             type="button"
@@ -315,7 +308,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                       <h2 id="player-loading-heading" className="mt-1 text-xl font-black text-white">Checking playback availability…</h2>
                       <div className="mt-4 aspect-video animate-pulse rounded-2xl bg-black ring-1 ring-white/10" />
                     </section>
-                  ) : (
+                  ) : mediaSources.length > 0 ? (
                     <StreamingPlayer
                       id={id}
                       mediaType={mediaType}
@@ -325,10 +318,18 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                       theaterMode={theaterMode}
                       onTheaterModeChange={setTheaterMode}
                     />
-                  )}
+                  ) : null}
                   <section aria-labelledby="cast-heading">
                     <h2 id="cast-heading" className="mb-5 text-2xl font-black">Main cast</h2>
                     <CastList cast={cast} />
+                  </section>
+
+                  <section aria-labelledby="watch-heading">
+                    <div className="mb-5">
+                      <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-400">South Africa</p>
+                      <h2 id="watch-heading" className="mt-1 text-2xl font-black">Where it is legally available</h2>
+                    </div>
+                    <WatchProviders providers={data['watch/providers']?.results?.ZA} />
                   </section>
                 </div>
 

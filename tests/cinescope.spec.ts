@@ -593,9 +593,9 @@ test('does not claim in-app playback when no authorised source exists', async ({
   })
   await page.goto('/movie/1')
   await expect(page.getByRole('button', { name: 'Watch Movie' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'View video player' })).toBeVisible()
-  await expect(page.locator('#streaming-player')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'No authorised source is available' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'View video player' })).toHaveCount(0)
+  await expect(page.locator('#streaming-player')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'No authorised source is available' })).toHaveCount(0)
   await expect(page.getByText(/No owned or licensed video is configured/)).toBeVisible()
 })
 
