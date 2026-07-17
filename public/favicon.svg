@@ -1,4 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="F Movies">
-  <rect width="64" height="64" rx="14" fill="#ffffff" />
-  <path d="M22 14H44V22.5H31V28.5H41V37H31V50H22Z" fill="#000000" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Rounded dark background container -->
+  <rect width="64" height="64" rx="16" fill="#0A0A0C" />
+  <rect x="0.5" y="0.5" width="63" height="63" rx="15.5" stroke="#FFFFFF" stroke-opacity="0.15" />
+  
+  <!-- Glowing gradient background orb -->
+  <circle cx="32" cy="32" r="20" fill="url(#glow)" opacity="0.25" />
+  
+  <!-- Minimalist Fedora Hat Silhouette -->
+  <!-- Crown -->
+  <path d="M22 36C21.5 28.5 24 20 32 20C40 20 42.5 28.5 42 36H22Z" fill="url(#hat-grad)" />
+  <!-- Indent highlight / shadow inside crown -->
+  <path d="M26 21C29 23.5 35 23.5 38 21C39 22 40 23.5 40 24.5C37 22.5 27 22.5 24 24.5C24 23.5 25 22 26 21Z" fill="#1E1B4B" opacity="0.4" />
+  <!-- Brim -->
+  <path d="M10 39C20 35 44 35 54 39C56 39.8 54 41.5 50 41.5C40 40 24 40 14 41.5C10 41.5 8 39.8 10 39Z" fill="url(#hat-grad)" />
+  <!-- Indigo/Blue ribbon/band around the crown -->
+  <path d="M21.8 33.5C25 34 39 34 42.2 33.5C42.8 34.5 43.1 35.5 43.1 36H20.9C20.9 35.5 21.2 34.5 21.8 33.5Z" fill="#6366F1" />
+  
+  <defs>
+    <linearGradient id="glow" x1="10" y1="10" x2="54" y2="54" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1" />
+      <stop offset="1" stop-color="#10B981" />
+    </linearGradient>
+    <linearGradient id="hat-grad" x1="10" y1="20" x2="54" y2="41.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#E4E4E7" />
+    </linearGradient>
+  </defs>
 </svg>
