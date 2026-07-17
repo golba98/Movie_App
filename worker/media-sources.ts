@@ -7,6 +7,13 @@ type MediaMimeType = 'video/mp4' | 'video/webm'
 type RightsBasis = 'owned' | 'licensed'
 
 const EXTRACTOR_REQUEST_TIMEOUT_MS = 12_000
+const STREAM_RESOLUTION_CACHE_TTL_MS = 10 * 60 * 1_000
+
+interface StreamResolutionCacheRow {
+  extracted_url: string
+}
+
+const inFlightStreamResolutions = new Map<string, Promise<string | null>>()
 
 interface MediaSourceRow {
   id: string
@@ -468,6 +475,45 @@ export async function extractDirectPlayerUrl(url: string, signal: AbortSignal): 
   }
 }
 
+async function cachedPlayerUrl(db: D1Database, sourceUrl: string) {
+  const row = await db
+    .prepare('SELECT extracted_url FROM stream_resolution_cache WHERE source_url = ? AND expires_at > ?')
+    .bind(sourceUrl, Date.now())
+    .first<StreamResolutionCacheRow>()
+  return row?.extracted_url ?? null
+}
+
+async function resolveAndCachePlayerUrl(db: D1Database, sourceUrl: string) {
+  const existing = inFlightStreamResolutions.get(sourceUrl)
+  if (existing) return existing
+
+  const resolution = (async () => {
+    const extractedUrl = await extractDirectPlayerUrl(sourceUrl, AbortSignal.timeout(EXTRACTOR_REQUEST_TIMEOUT_MS))
+    if (!extractedUrl) return null
+
+    const now = Date.now()
+    await db
+      .prepare(
+        `INSERT INTO stream_resolution_cache (source_url, extracted_url, expires_at, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(source_url) DO UPDATE SET
+           extracted_url = excluded.extracted_url,
+           expires_at = excluded.expires_at,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(sourceUrl, extractedUrl, now + STREAM_RESOLUTION_CACHE_TTL_MS, now)
+      .run()
+    return extractedUrl
+  })()
+
+  inFlightStreamResolutions.set(sourceUrl, resolution)
+  try {
+    return await resolution
+  } finally {
+    inFlightStreamResolutions.delete(sourceUrl)
+  }
+}
+
 export async function extractStreamEndpoint(request: Request, env: Env) {
   await requireUser(request, env.DB)
   const url = new URL(request.url)
@@ -481,10 +527,8 @@ export async function extractStreamEndpoint(request: Request, env: Env) {
     throw new ApiError(400, 'INVALID_URL', 'Use a valid HTTPS target URL.')
   }
 
-  const extractedUrl = await extractDirectPlayerUrl(
-    cleanedUrl,
-    AbortSignal.any([request.signal, AbortSignal.timeout(EXTRACTOR_REQUEST_TIMEOUT_MS)]),
-  )
+  const extractedUrl = await cachedPlayerUrl(env.DB, cleanedUrl)
+    ?? await resolveAndCachePlayerUrl(env.DB, cleanedUrl)
   return json({ extractedUrl })
 }
 

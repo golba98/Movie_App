@@ -7,6 +7,7 @@ beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS)
   await testEnv.DB.batch([
     testEnv.DB.prepare('DELETE FROM media_sources'),
+    testEnv.DB.prepare('DELETE FROM stream_resolution_cache'),
     testEnv.DB.prepare('DELETE FROM favourites'),
     testEnv.DB.prepare('DELETE FROM sessions'),
     testEnv.DB.prepare('DELETE FROM admin_audit_log'),
