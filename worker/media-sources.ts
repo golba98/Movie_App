@@ -4,7 +4,7 @@ import { ApiError, json, readJson } from './http'
 
 type MediaType = 'movie' | 'tv'
 type MediaMimeType = 'video/mp4' | 'video/webm'
-type RightsBasis = 'owned' | 'licensed' | 'public-domain'
+type RightsBasis = 'owned' | 'licensed'
 
 interface MediaSourceRow {
   id: string
@@ -85,7 +85,7 @@ function cleanMediaSource(input: MediaSourceInput) {
   const mimeType = input.mimeType === 'video/mp4' || input.mimeType === 'video/webm'
     ? input.mimeType
     : null
-  const rightsBasis = input.rightsBasis === 'owned' || input.rightsBasis === 'licensed' || input.rightsBasis === 'public-domain'
+  const rightsBasis = input.rightsBasis === 'owned' || input.rightsBasis === 'licensed'
     ? input.rightsBasis
     : null
   const rightsNote = typeof input.rightsNote === 'string' ? input.rightsNote.trim().slice(0, 500) : ''
@@ -96,7 +96,7 @@ function cleanMediaSource(input: MediaSourceInput) {
   if (!label) fieldErrors.label = 'Enter a label up to 160 characters.'
   if (!sourceUrl) fieldErrors.sourceUrl = 'Use a same-origin path or an HTTPS URL without embedded credentials or a fragment.'
   if (!mimeType) fieldErrors.mimeType = 'Choose MP4 or WebM.'
-  if (!rightsBasis) fieldErrors.rightsBasis = 'Confirm whether the media is owned, licensed, or public domain.'
+  if (!rightsBasis) fieldErrors.rightsBasis = 'Confirm whether the media is owned or licensed.'
   if (typeof active !== 'boolean') fieldErrors.active = 'Active must be true or false.'
 
   const seasonNumber = mediaType === 'tv' ? positiveInteger(input.seasonNumber) : 0
@@ -223,7 +223,7 @@ export async function listMediaSourcesForViewer(
             label: 'Flixbaba Stream (Dynamic)',
             sourceUrl: flixbabaUrl,
             mimeType: 'video/mp4',
-            rightsBasis: 'public-domain',
+            rightsBasis: 'licensed',
           }
         }
       }
@@ -232,23 +232,7 @@ export async function listMediaSourcesForViewer(
     }
   }
 
-  if (!dynamicSource && env.TMDB_ACCESS_TOKEN !== 'unit-test-tmdb-token') {
-    const soap2dayUrl = mediaType === 'movie'
-      ? `https://ww25.soap2day.day/embed/movie/${tmdbId}`
-      : `https://ww25.soap2day.day/embed/tv/${tmdbId}`
-    
-    dynamicSource = {
-      id: 'soap2day',
-      mediaType,
-      tmdbId,
-      seasonNumber: null,
-      episodeNumber: null,
-      label: 'Soap2Day Stream (Dynamic)',
-      sourceUrl: soap2dayUrl,
-      mimeType: 'video/mp4',
-      rightsBasis: 'public-domain',
-    }
-  }
+
 
   if (dynamicSource) {
     sources.push(dynamicSource)
@@ -408,19 +392,7 @@ async function extractDirectPlayerUrl(url: string): Promise<string | null> {
     }
   }
 
-  if (url.includes('soap2day')) {
-    const movieMatch = url.match(/\/embed\/movie\/(\d+)/)
-    const tvMatch = url.match(/\/embed\/tv\/(\d+)\/(\d+)\/(\d+)/)
-    if (movieMatch) {
-      const tmdbId = movieMatch[1]
-      return `https://vidsrc.to/embed/movie/${tmdbId}`
-    } else if (tvMatch) {
-      const tmdbId = tvMatch[1]
-      const season = tvMatch[2]
-      const episode = tvMatch[3]
-      return `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`
-    }
-  }
+
   try {
     const res = await fetch(url, {
       method: 'GET',

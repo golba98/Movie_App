@@ -183,7 +183,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
               <p className="mt-3 text-sm text-zinc-500">
                 {sourceError
                   ? 'Authorised playback availability could not be checked. Legal provider links remain below.'
-                  : 'No owned, licensed, or public-domain video is configured for in-app playback.'}
+                  : 'No owned or licensed video is configured for in-app playback.'}
               </p>
             )}
           </div>

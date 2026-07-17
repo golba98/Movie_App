@@ -108,7 +108,6 @@ function SourceFields({ draft, onChange }: { draft: SourceDraft; onChange: (draf
         <select value={draft.rightsBasis} onChange={(event) => update('rightsBasis', event.target.value as RightsBasis)} className="form-input mt-2">
           <option value="owned">Owned</option>
           <option value="licensed">Licensed</option>
-          <option value="public-domain">Public domain</option>
         </select>
       </label>
       <label className="text-sm text-zinc-300 md:col-span-2">Rights note
@@ -238,7 +237,7 @@ export function AdminMediaSourceCatalog() {
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white text-zinc-950"><Film size={20} aria-hidden="true" /></span>
           <div>
             <h2 id="media-sources-heading" className="text-xl font-semibold">Authorised media catalog</h2>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500">Map movies and TV episodes to direct owned, licensed, or public-domain MP4/WebM files. Fedora Movies never proxies the file or embeds a streaming website.</p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500">Map movies and TV episodes to direct owned or licensed MP4/WebM files. Fedora Movies never proxies the file or embeds a streaming website.</p>
           </div>
         </div>
         <span className="rounded-full bg-white/6 px-3 py-1.5 text-xs text-zinc-400">{sources.length} shown</span>

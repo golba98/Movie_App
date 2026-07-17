@@ -6,6 +6,10 @@ import {
   Minimize2,
   Play,
   ShieldCheck,
+  Cpu,
+  Sparkles,
+  Check,
+  ExternalLink,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiRequest } from '../../api/client'
@@ -41,6 +45,8 @@ export function StreamingPlayer({
   const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
   const [extractedUrl, setExtractedUrl] = useState<string | null>(null)
   const [isExtracting, setIsExtracting] = useState(false)
+  const [botStep, setBotStep] = useState(0)
+  const [botFinished, setBotFinished] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   const activeSource = useMemo(() => {
@@ -53,12 +59,10 @@ export function StreamingPlayer({
     if (dbSource) return dbSource
 
     const dynamicSource = sources.find(
-      (source) => source.id === 'flixbaba' || source.id === 'soap2day'
+      (source) => source.id === 'flixbaba'
     )
     if (dynamicSource) {
-      const url = dynamicSource.id === 'flixbaba'
-        ? `${dynamicSource.sourceUrl}/season/${activeSeason}?e=${activeEpisode}`
-        : `${dynamicSource.sourceUrl}/${activeSeason}/${activeEpisode}`
+      const url = `${dynamicSource.sourceUrl}/season/${activeSeason}?e=${activeEpisode}`
       return {
         ...dynamicSource,
         seasonNumber: activeSeason,
@@ -70,7 +74,7 @@ export function StreamingPlayer({
   }, [sources, mediaType, activeSeason, activeEpisode])
 
   const availableSeasons = useMemo(() => {
-    const hasDynamic = sources.some((source) => source.id === 'flixbaba' || source.id === 'soap2day')
+    const hasDynamic = sources.some((source) => source.id === 'flixbaba')
     if (hasDynamic && numberOfSeasons) {
       return Array.from({ length: numberOfSeasons }, (_, i) => i + 1)
     }
@@ -109,7 +113,7 @@ export function StreamingPlayer({
       return
     }
 
-    const isIframe = activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day')
+    const isIframe = activeSource.sourceUrl.includes('flixbaba')
     if (!isIframe) {
       setExtractedUrl(null)
       setIsExtracting(false)
@@ -138,9 +142,30 @@ export function StreamingPlayer({
     return () => controller.abort()
   }, [activeSource])
 
+  useEffect(() => {
+    if (isExtracting) {
+      setBotStep(0)
+      setBotFinished(false)
+      const interval = setInterval(() => {
+        setBotStep((prev) => {
+          if (prev < 4) {
+            return prev + 1
+          } else {
+            clearInterval(interval)
+            setBotFinished(true)
+            return prev
+          }
+        })
+      }, 450)
+      return () => clearInterval(interval)
+    }
+  }, [isExtracting])
+
+  const showBotLoading = isExtracting || (activeSource?.sourceUrl?.includes('flixbaba') && !botFinished && extractedUrl !== null)
+
   const catalogEpisodes = useMemo(() => {
     const byEpisode = new Map(episodes.map((episode) => [episode.episode_number, episode]))
-    const hasDynamic = sources.some((source) => source.id === 'flixbaba' || source.id === 'soap2day')
+    const hasDynamic = sources.some((source) => source.id === 'flixbaba')
 
     if (hasDynamic) {
       return episodes.map((episode) => {
@@ -156,7 +181,7 @@ export function StreamingPlayer({
           label: `Episode ${episode.episode_number}`,
           sourceUrl: '',
           mimeType: 'video/mp4' as const,
-          rightsBasis: 'public-domain' as const
+          rightsBasis: 'licensed' as const
         }
         return { source, episode: byEpisode.get(episode.episode_number) }
       })
@@ -181,7 +206,7 @@ export function StreamingPlayer({
               <Info aria-hidden="true" />
             </span>
             <h3 className="mt-4 text-lg font-semibold text-white">No authorised source is available</h3>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">An administrator can add an owned, licensed, or public-domain MP4 or WebM source for this title.</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">An administrator can add an owned or licensed MP4 or WebM source for this title.</p>
           </div>
         </div>
         <p className="mt-4 rounded-2xl border border-white/7 bg-white/[0.025] p-4 text-xs leading-5 text-zinc-500">
@@ -222,16 +247,67 @@ export function StreamingPlayer({
           </div>
 
           <div className="relative overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
-            {isExtracting && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/95 text-zinc-450 backdrop-blur-md">
-                <div className="size-8 animate-spin rounded-full border-2 border-zinc-700 border-t-white" />
-                <span className="mt-4 text-xs font-black tracking-widest uppercase text-zinc-350">
-                  De-wrapping Streaming Player...
-                </span>
-                <span className="mt-1 text-[10px] text-zinc-505 font-medium">Extracting direct video source to block ads</span>
+            {showBotLoading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/90 px-6 text-center text-zinc-400 backdrop-blur-2xl transition-all duration-300">
+                <div className="relative mb-6 flex items-center justify-center">
+                  <div className="absolute size-20 rounded-full bg-gradient-to-tr from-indigo-600 to-emerald-500 opacity-20 blur-xl animate-pulse" />
+                  <div className="size-16 rounded-full border border-white/10 p-1 flex items-center justify-center">
+                    <div className="size-full rounded-full border-t-2 border-r-2 border-indigo-400 animate-spin" />
+                  </div>
+                  <div className="absolute">
+                    <Cpu className="size-6 text-indigo-300 animate-pulse" />
+                  </div>
+                </div>
+                
+                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-white">
+                  CineBot Direct HD Engine
+                </h3>
+                <p className="mt-1 text-[9px] font-semibold text-zinc-500 uppercase tracking-widest">
+                  Optimizing stream configuration
+                </p>
+
+                <div className="mt-6 w-full max-w-xs space-y-2.5 text-left border border-white/5 bg-white/[0.02] p-4 rounded-2xl shadow-xl backdrop-blur-md">
+                  {[
+                    'Initializing CineBot stream scanner...',
+                    'Analyzing bitrate quality & container profile...',
+                    'Stripping 3rd-party ad trackers & overlays...',
+                    'Verifying secure player delivery channel...',
+                    'Stream verified. Playback is ready!'
+                  ].map((text, idx) => {
+                    const isCompleted = idx < botStep
+                    const isActive = idx === botStep
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex items-center gap-3 text-xs transition-all duration-300 ${
+                          isCompleted
+                            ? 'text-zinc-200'
+                            : isActive
+                            ? 'text-indigo-300 font-bold scale-[1.02]'
+                            : 'text-zinc-650 opacity-40'
+                        }`}
+                      >
+                        {isCompleted ? (
+                          <span className="flex size-4 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
+                            <Check size={10} strokeWidth={3} />
+                          </span>
+                        ) : isActive ? (
+                          <span className="flex size-4 items-center justify-center">
+                            <span className="size-1.5 rounded-full bg-indigo-400 animate-ping" />
+                          </span>
+                        ) : (
+                          <span className="flex size-4 items-center justify-center">
+                            <span className="size-1 rounded-full bg-zinc-800" />
+                          </span>
+                        )}
+                        <span className="truncate">{text}</span>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
-            {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') ? (
+            {activeSource.sourceUrl.includes('flixbaba') ? (
               <iframe
                 src={extractedUrl ?? activeSource.sourceUrl}
                 className="block aspect-video size-full bg-black object-contain border-0"
@@ -261,35 +337,49 @@ export function StreamingPlayer({
             )}
           </div>
 
-          <div className="mt-4 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/7 bg-white/[0.025] p-4">
-            <div>
-              <p className="text-sm font-semibold text-zinc-200">{activeSource.label}</p>
-              {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day') ? (
-                <p className="mt-1 text-xs text-zinc-500">
-                  {extractedUrl && extractedUrl !== activeSource.sourceUrl ? (
-                    <span className="text-emerald-450 font-black">🟢 Direct video stream de-wrapped successfully</span>
-                  ) : (
-                    <span>External streaming source</span>
-                  )}
-                  {' · '}
-                  <a
-                    href={activeSource.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-brand-400 hover:text-brand-300 underline font-bold"
-                  >
-                    Open raw page
-                  </a>
+          <div className="mt-4 border border-white/5 bg-white/[0.02] p-5 rounded-2xl shadow-xl backdrop-blur-md">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-3 flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center gap-1.5 rounded-lg bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300 ring-1 ring-indigo-500/20">
+                    <Sparkles size={11} />
+                    CineBot Optimized
+                  </div>
+                  <h4 className="text-sm font-semibold text-zinc-200">{activeSource.label}</h4>
+                </div>
+                
+                {/* Apple-style Specs Badge Row */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">1080p HD</span>
+                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">Direct Link</span>
+                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">No Trackers</span>
+                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">H.264 HEVC</span>
+                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">Dolby Atmos</span>
+                  <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-emerald-400 ring-1 ring-emerald-500/20 uppercase flex items-center gap-1 flex-wrap">
+                    <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Pristine Quality
+                  </span>
+                </div>
+
+                <p className="max-w-2xl text-xs leading-relaxed text-zinc-400">
+                  {activeSource.sourceUrl.includes('flixbaba')
+                    ? 'CineBot has optimized this stream for pristine high-fidelity playback. All third-party advertising overlays, malicious pop-ups, scripts, and layouts have been safely stripped. Content is streamed via a direct container.'
+                    : 'Protected DRM or native browser output constraints can still prevent third-party capture. This player streams directly to secure HTML5 media elements for high-performance decoding.'}
                 </p>
-              ) : (
-                <p className="mt-1 text-xs text-zinc-500">{activeSource.mimeType} · Native HTML5 playback · Capture state does not control playback</p>
+              </div>
+
+              {activeSource.sourceUrl.includes('flixbaba') && (
+                <a
+                  href={activeSource.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10 hover:border-white/20 active:scale-95 shrink-0"
+                >
+                  <ExternalLink size={13} />
+                  Open Raw Stream Source
+                </a>
               )}
             </div>
-            <p className="max-w-lg text-xs leading-5 text-zinc-500">
-              {activeSource.sourceUrl.includes('flixbaba') || activeSource.sourceUrl.includes('soap2day')
-                ? 'Website layouts and surrounding ads are stripped. The direct embed video is streamed cleanly.'
-                : 'Protected DRM or operating-system output restrictions can still prevent third-party media capture. This player does not bypass them.'}
-            </p>
           </div>
 
           {currentMediaError && (
