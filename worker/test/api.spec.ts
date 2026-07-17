@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { SELF } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
+import { PASSWORD_ITERATIONS } from '../crypto'
 import worker from '../index'
 
 const origin = 'https://fedora.test'
@@ -299,13 +300,15 @@ describe('viewer authentication and account controls', () => {
     })
     const rawCookie = cookieFrom(login).split('=', 2)[1]
     const account = await env.DB
-      .prepare('SELECT password_hash, password_salt FROM accounts WHERE username_normalized = ?')
+      .prepare('SELECT password_hash, password_salt, password_iterations FROM accounts WHERE username_normalized = ?')
       .bind('viewer.one')
-      .first<{ password_hash: string; password_salt: string }>()
+      .first<{ password_hash: string; password_salt: string; password_iterations: number }>()
     const session = await env.DB.prepare('SELECT token_hash FROM sessions WHERE subject_type = ?').bind('user').first<{ token_hash: string }>()
 
     expect(account?.password_hash).not.toContain('temporary-password-123')
     expect(account?.password_salt).toBeTruthy()
+    expect(account?.password_iterations).toBe(PASSWORD_ITERATIONS)
+    expect(PASSWORD_ITERATIONS).toBeLessThanOrEqual(100_000)
     expect(session?.token_hash).not.toBe(rawCookie)
   })
 })

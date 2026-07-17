@@ -1,5 +1,8 @@
 const encoder = new TextEncoder()
-const PASSWORD_ITERATIONS = 600_000
+// Cloudflare Workers' Web Crypto implementation currently accepts PBKDF2
+// iteration counts up to 100,000. Keeping the work factor at that supported
+// limit prevents authentication requests from failing at runtime.
+export const PASSWORD_ITERATIONS = 100_000
 const subtle = crypto.subtle as SubtleCrypto & {
   timingSafeEqual: (left: ArrayBuffer | ArrayBufferView, right: ArrayBuffer | ArrayBufferView) => boolean
 }
@@ -48,6 +51,9 @@ export async function verifyPassword(
   saltValue: string,
   iterations: number,
 ) {
+  // Accounts created by an earlier deployment used an unsupported work factor.
+  // They cannot be verified in the Worker, and must be reset by an administrator.
+  if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > PASSWORD_ITERATIONS) return false
   const salt = base64UrlToBytes(saltValue)
   const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, [
     'deriveBits',
