@@ -123,7 +123,7 @@ const authorisedMediaSources = [
     seasonNumber: 1,
     episodeNumber: 2,
     label: 'Test licensed episode two',
-    sourceUrl: '/test-media/capture-test.mp4',
+    sourceUrl: '/test-media/capture-test.mp4?episode=2',
     mimeType: 'video/mp4',
     rightsBasis: 'licensed',
   },
@@ -133,6 +133,7 @@ async function mockTmdb(page: Page) {
   let favourites: Record<string, unknown>[] = []
   let adminAuthenticated = false
   const accounts: Record<string, unknown>[] = []
+  let adminMediaSources: Record<string, unknown>[] = []
 
   await page.route('**/api/auth/**', async (route) => {
     const path = new URL(route.request().url()).pathname
@@ -201,6 +202,31 @@ async function mockTmdb(page: Page) {
       return route.fulfill({ json: { data: { authenticated: true } } })
     }
     if (!adminAuthenticated) return route.fulfill({ status: 401, json: { error: { message: 'Sign in first.' } } })
+    if (path === '/api/admin/media-sources' && request.method() === 'GET') {
+      return route.fulfill({ json: { data: { sources: adminMediaSources } } })
+    }
+    if (path === '/api/admin/media-sources' && request.method() === 'POST') {
+      const input = request.postDataJSON() as Record<string, unknown>
+      const source = {
+        id: `media-source-${adminMediaSources.length + 1}`,
+        ...input,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      adminMediaSources = [source, ...adminMediaSources]
+      return route.fulfill({ status: 201, json: { data: { source } } })
+    }
+    const mediaSourceMatch = path.match(/^\/api\/admin\/media-sources\/([^/]+)$/)
+    if (mediaSourceMatch && request.method() === 'PATCH') {
+      const changes = request.postDataJSON() as Record<string, unknown>
+      const source = { ...adminMediaSources.find((item) => item.id === mediaSourceMatch[1]), ...changes, updatedAt: Date.now() }
+      adminMediaSources = adminMediaSources.map((item) => item.id === mediaSourceMatch[1] ? source : item)
+      return route.fulfill({ json: { data: { source } } })
+    }
+    if (mediaSourceMatch && request.method() === 'DELETE') {
+      adminMediaSources = adminMediaSources.filter((item) => item.id !== mediaSourceMatch[1])
+      return route.fulfill({ json: { data: { removed: true } } })
+    }
     if (path === '/api/admin/audit') return route.fulfill({ json: { data: { events: [] } } })
     if (path === '/api/admin/accounts' && request.method() === 'GET') return route.fulfill({ json: { data: { accounts } } })
     if (path === '/api/admin/accounts' && request.method() === 'POST') {
@@ -233,6 +259,9 @@ async function mockTmdb(page: Page) {
   })
   await page.route('https://www.youtube-nocookie.com/**', async (route) => {
     await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Trailer</title>' })
+  })
+  await page.route('**/test-media/capture-test.mp4*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'video/mp4', body: '' })
   })
   await page.route('**/api/tmdb/**', async (route) => {
     const url = new URL(route.request().url())
@@ -392,6 +421,14 @@ test('admin can sign in and create a viewer without retaining the password', asy
   await page.getByRole('button', { name: 'Open admin' }).click()
   await expect(page.getByRole('heading', { name: 'Control the library' })).toBeVisible()
 
+  await page.getByLabel('TMDB ID').fill('1')
+  await page.getByLabel('Display label').fill('Owned capture demonstration')
+  await page.getByLabel('Direct media URL').fill('/test-media/capture-test.mp4')
+  await page.getByLabel('Rights note').fill('Generated test pattern owned by this project')
+  await page.getByRole('button', { name: 'Add authorised source' }).click()
+  await expect(page.getByRole('heading', { name: 'Owned capture demonstration' })).toBeVisible()
+  await expect(page.getByText(/Added Owned capture demonstration/)).toBeVisible()
+
   await page.getByLabel('Username').fill('new.viewer')
   await page.getByLabel('Display name').fill('New Viewer')
   await page.getByLabel('Temporary password', { exact: true }).fill('temporary-password-123')
@@ -464,8 +501,36 @@ test('plays only administrator-configured authorised media sources', async ({ pa
   await page.getByRole('button', { name: 'Watch authorised video' }).click()
   const player = page.locator('#streaming-player')
   await expect(player).toBeVisible()
-  await expect(player.getByLabel('Video player for Dune: Part Two')).toHaveAttribute('src', '/test-media/capture-test.mp4')
+  const movieVideo = player.getByLabel('Video player for Dune: Part Two')
+  await expect(movieVideo).toHaveAttribute('src', '/test-media/capture-test.mp4')
+  await expect(movieVideo).toHaveAttribute('controls', '')
+  await expect(movieVideo).toHaveAttribute('playsinline', '')
+  await expect(movieVideo).toHaveAttribute('preload', 'metadata')
+  await expect(player.locator('iframe, canvas')).toHaveCount(0)
   await expect(player.getByText('Test licensed movie')).toBeVisible()
+
+  await movieVideo.evaluate((element) => {
+    const state = window as typeof window & {
+      __movieVideo?: Element
+      __moviePauseCalls?: number
+    }
+    const video = element as HTMLVideoElement
+    state.__movieVideo = video
+    state.__moviePauseCalls = 0
+    const nativePause = video.pause.bind(video)
+    video.pause = () => {
+      state.__moviePauseCalls = (state.__moviePauseCalls ?? 0) + 1
+      nativePause()
+    }
+  })
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('blur'))
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('focus'))
+  })
+  await player.getByRole('button', { name: 'Theater mode' }).click()
+  expect(await movieVideo.evaluate((element) => element === (window as typeof window & { __movieVideo?: Element }).__movieVideo)).toBe(true)
+  expect(await page.evaluate(() => (window as typeof window & { __moviePauseCalls?: number }).__moviePauseCalls)).toBe(0)
 
   await page.goto('/tv/10')
   await page.getByRole('button', { name: 'Watch authorised video' }).click()
@@ -474,7 +539,71 @@ test('plays only administrator-configured authorised media sources', async ({ pa
   await expect(tvPlayer).toBeVisible()
   await expect(tvPlayer.getByRole('button', { name: /Dulcinea/ })).toBeVisible()
   await expect(tvPlayer.getByRole('button', { name: /The Big Empty/ })).toBeVisible()
-  await tvPlayer.getByRole('button', { name: 'The Big Empty' }).click()
-  await expect(tvPlayer.getByLabel('Video player for The Expanse')).toHaveAttribute('src', '/test-media/capture-test.mp4')
+  const tvVideo = tvPlayer.getByLabel('Video player for The Expanse')
+  await tvVideo.evaluate((element) => {
+    (window as typeof window & { __tvVideo?: Element }).__tvVideo = element
+  })
+  await tvPlayer.getByRole('button', { name: /The Big Empty/ }).click()
+  await expect(tvVideo).toHaveAttribute('src', '/test-media/capture-test.mp4?episode=2')
+  expect(await tvVideo.evaluate((element) => element === (window as typeof window & { __tvVideo?: Element }).__tvVideo)).toBe(true)
   await expect(tvPlayer.getByText('Test licensed episode two')).toBeVisible()
+})
+
+test('does not claim in-app playback when no authorised source exists', async ({ page }) => {
+  await page.route('**/api/media-sources/movie/1', async (route) => {
+    await route.fulfill({ json: { data: { sources: [] } } })
+  })
+  await page.goto('/movie/1')
+  await expect(page.getByRole('button', { name: 'Watch authorised video' })).toHaveCount(0)
+  await expect(page.getByText(/No owned, licensed, or public-domain video is configured/)).toBeVisible()
+})
+
+test('capture compatibility start and stop never pauses or replaces the original video', async ({ page }) => {
+  await page.goto('/capture-test')
+  await page.evaluate(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 16
+    canvas.height = 9
+    const stream = canvas.captureStream(30)
+    const track = stream.getVideoTracks()[0]
+    const nativeStop = track.stop.bind(track)
+    Object.defineProperty(track, 'getSettings', {
+      configurable: true,
+      value: () => ({ displaySurface: 'browser', width: 1280, height: 720, frameRate: 30 }),
+    })
+    track.stop = () => {
+      const state = window as typeof window & { __captureTrackStopCalls?: number }
+      state.__captureTrackStopCalls = (state.__captureTrackStopCalls ?? 0) + 1
+      nativeStop()
+    }
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getDisplayMedia: async () => stream },
+    })
+  })
+  const original = page.getByLabel('Original capture compatibility test video')
+  await expect(original).toHaveAttribute('controls', '')
+  await expect(original).toHaveAttribute('playsinline', '')
+  await expect(original).toHaveAttribute('preload', 'metadata')
+  await original.evaluate((element) => {
+    const state = window as typeof window & { __captureOriginal?: Element; __captureOriginalPauseCalls?: number }
+    const video = element as HTMLVideoElement
+    state.__captureOriginal = video
+    state.__captureOriginalPauseCalls = 0
+    const nativePause = video.pause.bind(video)
+    video.pause = () => {
+      state.__captureOriginalPauseCalls = (state.__captureOriginalPauseCalls ?? 0) + 1
+      nativePause()
+    }
+  })
+
+  await page.getByRole('button', { name: 'Test screen capture' }).click()
+  await expect(page.getByRole('status')).toContainText('Surface: browser')
+  expect(await original.evaluate((element) => element === (window as typeof window & { __captureOriginal?: Element }).__captureOriginal)).toBe(true)
+  expect(await page.evaluate(() => (window as typeof window & { __captureOriginalPauseCalls?: number }).__captureOriginalPauseCalls)).toBe(0)
+
+  await page.getByRole('button', { name: 'Stop capture' }).click()
+  await expect(page.getByRole('status')).toContainText('Capture stopped')
+  expect(await page.evaluate(() => (window as typeof window & { __captureTrackStopCalls?: number }).__captureTrackStopCalls)).toBe(1)
+  expect(await page.evaluate(() => (window as typeof window & { __captureOriginalPauseCalls?: number }).__captureOriginalPauseCalls)).toBe(0)
 })

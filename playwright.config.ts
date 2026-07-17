@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
-  timeout: 30_000,
+  timeout: 45_000,
   expect: { timeout: 8_000 },
   reporter: [['list']],
   use: {
@@ -14,6 +14,10 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'android-chromium',
