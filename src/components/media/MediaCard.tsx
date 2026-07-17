@@ -1,8 +1,8 @@
 import { Heart, Star } from 'lucide-react'
 import { Link } from 'react-router'
-import { useFavourites } from '../hooks/useFavourites'
-import type { MediaItem } from '../types/tmdb'
-import { formatRating, mediaPath } from '../utils/media'
+import { useFavourites } from '../../hooks/useFavourites'
+import type { MediaItem } from '../../types/tmdb'
+import { formatRating, mediaPath } from '../../utils/media'
 import { PosterImage } from './PosterImage'
 
 export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolean }) {

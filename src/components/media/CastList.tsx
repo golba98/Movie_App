@@ -1,6 +1,6 @@
 import { UserRound } from 'lucide-react'
-import type { CastMember } from '../types/tmdb'
-import { profileUrl } from '../utils/images'
+import type { CastMember } from '../../types/tmdb'
+import { profileUrl } from '../../utils/images'
 
 export function CastList({ cast }: { cast: CastMember[] }) {
   if (cast.length === 0) {

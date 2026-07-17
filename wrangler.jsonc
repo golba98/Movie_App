@@ -1,9 +1,27 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "movie-app",
-  "compatibility_date": "2026-07-15",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-07-17",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "movie-streaming-app-db",
+      "database_id": "1e038815-7d0b-4830-840b-d2661ba98c27",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "secrets": {
+    "required": ["ADMIN_PASSWORD", "TMDB_ACCESS_TOKEN"]
+  },
+  "observability": {
+    "enabled": true
   }
 }

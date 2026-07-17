@@ -1,6 +1,6 @@
 import { Film } from 'lucide-react'
 import { useState } from 'react'
-import { posterUrl } from '../utils/images'
+import { posterUrl } from '../../utils/images'
 
 export function PosterImage({ path, title }: { path: string | null; title: string }) {
   const source = posterUrl(path)

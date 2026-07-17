@@ -1,0 +1,241 @@
+import {
+  AlertCircle,
+  ChevronDown,
+  Info,
+  Maximize2,
+  Minimize2,
+  Play,
+  ShieldCheck,
+} from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { getTvSeasonDetails } from '../../api/tmdb'
+import { useVideoDiagnostics } from '../../hooks/useVideoDiagnostics'
+import type { MediaSource } from '../../types/media-source'
+import type { Episode, MediaType } from '../../types/tmdb'
+import { imageUrl } from '../../utils/images'
+
+interface StreamingPlayerProps {
+  id: number
+  mediaType: MediaType
+  title: string
+  numberOfSeasons?: number | null
+  sources: MediaSource[]
+}
+
+function sourceForEpisode(sources: MediaSource[], seasonNumber: number, episodeNumber: number) {
+  return sources.find((source) => (
+    source.seasonNumber === seasonNumber && source.episodeNumber === episodeNumber
+  ))
+}
+
+export function StreamingPlayer({
+  id,
+  mediaType,
+  title,
+  numberOfSeasons,
+  sources,
+}: StreamingPlayerProps) {
+  const initialSource = sources[0]
+  const [activeSeason, setActiveSeason] = useState(initialSource?.seasonNumber ?? 1)
+  const [activeEpisode, setActiveEpisode] = useState(initialSource?.episodeNumber ?? 1)
+  const [theaterMode, setTheaterMode] = useState(false)
+  const [seasonDropdownOpen, setSeasonDropdownOpen] = useState(false)
+  const [episodes, setEpisodes] = useState<Episode[]>([])
+  const [loadingEpisodes, setLoadingEpisodes] = useState(mediaType === 'tv')
+  const [episodesError, setEpisodesError] = useState<string | null>(null)
+  const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  const activeSource = mediaType === 'movie'
+    ? sources[0]
+    : sourceForEpisode(sources, activeSeason, activeEpisode)
+  const availableSeasons = useMemo(() => (
+    [...new Set(sources.flatMap((source) => source.seasonNumber ?? []))].sort((a, b) => a - b)
+  ), [sources])
+
+  useVideoDiagnostics(
+    videoRef,
+    `player:${mediaType}:${id}`,
+    activeSource?.sourceUrl ?? '',
+  )
+
+  useEffect(() => {
+    if (mediaType !== 'tv') return
+    const controller = new AbortController()
+    setLoadingEpisodes(true)
+    setEpisodesError(null)
+    getTvSeasonDetails(id, activeSeason, controller.signal)
+      .then((data) => {
+        setEpisodes(data.episodes ?? [])
+        setLoadingEpisodes(false)
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+        setEpisodes([])
+        setEpisodesError('Episode metadata is unavailable. Authorised episodes remain playable.')
+        setLoadingEpisodes(false)
+      })
+    return () => controller.abort()
+  }, [activeSeason, id, mediaType])
+
+  const catalogEpisodes = useMemo(() => {
+    const byEpisode = new Map(episodes.map((episode) => [episode.episode_number, episode]))
+    return sources
+      .filter((source) => source.seasonNumber === activeSeason && source.episodeNumber !== null)
+      .sort((a, b) => (a.episodeNumber ?? 0) - (b.episodeNumber ?? 0))
+      .map((source) => ({ source, episode: byEpisode.get(source.episodeNumber!) }))
+  }, [activeSeason, episodes, sources])
+
+  if (!activeSource) {
+    return (
+      <section id="streaming-player" className="scroll-mt-20 rounded-3xl border border-amber-300/15 bg-amber-300/5 p-6">
+        <div className="flex items-start gap-3">
+          <Info className="mt-0.5 shrink-0 text-amber-200" aria-hidden="true" />
+          <div>
+            <h2 className="font-semibold text-white">No authorised source is available</h2>
+            <p className="mt-1 text-sm text-zinc-400">Ask the administrator to configure an owned, licensed, or public-domain video.</p>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  const currentMediaError = mediaError?.sourceId === activeSource.id ? mediaError.message : null
+
+  return (
+    <section id="streaming-player" className="scroll-mt-20" aria-labelledby="player-heading">
+      <div className={`grid grid-cols-1 gap-6 ${theaterMode || mediaType === 'movie' ? '' : 'lg:grid-cols-3'}`}>
+        <div className={theaterMode || mediaType === 'movie' ? 'w-full' : 'lg:col-span-2'}>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Authorised direct media</p>
+              <h2 id="player-heading" className="mt-1 line-clamp-1 text-lg font-black text-white">
+                {title}{mediaType === 'tv' ? ` — S${activeSeason} E${activeEpisode}` : ''}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/8 px-3 text-[11px] font-bold text-emerald-200">
+                <ShieldCheck size={14} aria-hidden="true" />
+                {activeSource.rightsBasis.replace('-', ' ')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setTheaterMode((current) => !current)}
+                className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                aria-label={theaterMode ? 'Exit theater mode' : 'Theater mode'}
+                title={theaterMode ? 'Exit theater mode' : 'Theater mode'}
+              >
+                {theaterMode ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
+            <video
+              ref={videoRef}
+              src={activeSource.sourceUrl}
+              controls
+              playsInline
+              preload="metadata"
+              className="block aspect-video size-full bg-black object-contain"
+              aria-label={`Video player for ${title}`}
+              onLoadedMetadata={() => setMediaError(null)}
+              onError={(event) => {
+                const video = event.currentTarget
+                setMediaError({
+                  sourceId: activeSource.id,
+                  message: video.error?.message || 'The authorised video could not be loaded. Check the source format and host response.',
+                })
+              }}
+            />
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/7 bg-white/[0.025] p-4">
+            <div>
+              <p className="text-sm font-semibold text-zinc-200">{activeSource.label}</p>
+              <p className="mt-1 text-xs text-zinc-500">{activeSource.mimeType} · Native HTML5 playback · Capture state does not control playback</p>
+            </div>
+            <p className="max-w-lg text-xs leading-5 text-zinc-500">
+              Protected DRM or operating-system output restrictions can still prevent third-party media capture. This player does not bypass them.
+            </p>
+          </div>
+
+          {currentMediaError && (
+            <p role="alert" className="mt-3 flex items-start gap-2 rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm text-red-200">
+              <AlertCircle className="mt-0.5 shrink-0" size={17} aria-hidden="true" />
+              {currentMediaError}
+            </p>
+          )}
+        </div>
+
+        {mediaType === 'tv' && !theaterMode && (
+          <aside className="flex flex-col rounded-3xl border border-white/7 bg-white/[0.025] p-4" aria-labelledby="episodes-heading">
+            <div className="mb-3 flex items-center justify-between gap-3 border-b border-white/7 pb-3">
+              <div>
+                <h3 id="episodes-heading" className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-white">
+                  <Play size={12} className="fill-current" aria-hidden="true" />Authorised episodes
+                </h3>
+                <p className="mt-1 text-[10px] text-zinc-500">{numberOfSeasons ?? availableSeasons.length} catalog season(s)</p>
+              </div>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSeasonDropdownOpen((current) => !current)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-black text-white hover:bg-white/10"
+                >
+                  Season {activeSeason}<ChevronDown size={14} aria-hidden="true" />
+                </button>
+                {seasonDropdownOpen && (
+                  <div className="absolute right-0 z-30 mt-1.5 max-h-48 w-32 overflow-y-auto rounded-2xl border border-white/7 bg-zinc-950 py-1 shadow-2xl">
+                    {availableSeasons.map((seasonNumber) => (
+                      <button
+                        key={seasonNumber}
+                        type="button"
+                        onClick={() => {
+                          const firstSource = sources.find((source) => source.seasonNumber === seasonNumber)
+                          setActiveSeason(seasonNumber)
+                          setActiveEpisode(firstSource?.episodeNumber ?? 1)
+                          setSeasonDropdownOpen(false)
+                        }}
+                        className={`w-full px-3 py-2.5 text-left text-xs font-bold hover:bg-white/5 ${activeSeason === seasonNumber ? 'bg-white/5 text-white' : 'text-zinc-400'}`}
+                      >
+                        Season {seasonNumber}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="max-h-[500px] flex-1 space-y-2 overflow-y-auto pr-1 scrollbar-subtle">
+              {loadingEpisodes && <p role="status" className="py-6 text-center text-xs text-zinc-500">Loading episode details…</p>}
+              {episodesError && <p className="rounded-xl bg-amber-300/5 px-3 py-2 text-xs text-amber-100">{episodesError}</p>}
+              {catalogEpisodes.map(({ source, episode }) => {
+                const selected = source.id === activeSource.id
+                const stillUrl = imageUrl(episode?.still_path, 'w185')
+                return (
+                  <button
+                    key={source.id}
+                    type="button"
+                    onClick={() => setActiveEpisode(source.episodeNumber!)}
+                    aria-pressed={selected}
+                    className={`flex w-full items-start gap-3 rounded-2xl border p-2 text-left transition ${selected ? 'border-white/20 bg-white/10 text-white' : 'border-white/5 bg-white/[0.02] text-zinc-400 hover:bg-white/5 hover:text-white'}`}
+                  >
+                    <span className="relative aspect-video w-24 shrink-0 overflow-hidden rounded-xl bg-zinc-900">
+                      {stillUrl ? <img src={stillUrl} alt="" className="size-full object-cover" loading="lazy" /> : <span className="grid size-full place-items-center"><Play size={14} aria-hidden="true" /></span>}
+                      <span className="absolute bottom-1 right-1 rounded bg-black/85 px-1.5 py-0.5 text-[8px] font-black text-zinc-200">EP {source.episodeNumber}</span>
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="line-clamp-1 block text-xs font-black">{episode?.name || source.label}</span>
+                      <span className="mt-1 line-clamp-2 block text-[9px] leading-relaxed text-zinc-500">{episode?.overview || 'Authorised episode available.'}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </aside>
+        )}
+      </div>
+    </section>
+  )
+}

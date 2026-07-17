@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { browseFor, isTmdbConfigured } from '../api/tmdb'
-import { ErrorMessage } from '../components/ErrorMessage'
-import { GridSkeleton } from '../components/LoadingSkeleton'
-import { MediaCard } from '../components/MediaCard'
-import { SetupMessage } from '../components/SetupMessage'
+import { browseFor } from '../api/tmdb'
+import { ErrorMessage } from '../components/ui/ErrorMessage'
+import { GridSkeleton } from '../components/ui/LoadingSkeleton'
+import { MediaCard } from '../components/media/MediaCard'
 import type { MediaItem, MediaType } from '../types/tmdb'
 import { normalizeMediaList } from '../utils/media'
 
@@ -43,15 +42,12 @@ export function BrowsePage({ mediaType }: { mediaType: MediaType }) {
   )
 
   useEffect(() => {
-    if (!isTmdbConfigured) return
     const controller = new AbortController()
     setItems([])
     setPage(0)
     void loadPage(1, false, controller.signal)
     return () => controller.abort()
   }, [loadPage])
-
-  if (!isTmdbConfigured) return <SetupMessage />
 
   const title = mediaType === 'movie' ? 'Popular movies' : 'Popular TV shows'
   const description =

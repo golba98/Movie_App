@@ -2,8 +2,8 @@ export function Footer() {
   return (
     <footer className="border-t border-[#262626]">
       <div className="mx-auto flex max-w-7xl flex-col gap-1 px-6 py-8 lg:px-8">
-        <p className="text-sm text-[#999999]">A legal movie discovery demo using TMDB data.</p>
-        <p className="text-xs text-[#666666]">
+        <p className="text-sm text-[#999999]">A private movie and TV library powered by TMDB data.</p>
+        <p className="text-xs text-zinc-400">
           This product uses the{' '}
           <a
             href="https://www.themoviedb.org"

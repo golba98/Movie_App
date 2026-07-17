@@ -1,6 +1,6 @@
 import { X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import type { Video } from '../types/tmdb'
+import type { Video } from '../../types/tmdb'
 
 export function TrailerModal({
   trailer,

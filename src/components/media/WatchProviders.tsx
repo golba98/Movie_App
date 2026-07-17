@@ -1,7 +1,7 @@
 import { ExternalLink } from 'lucide-react'
-import type { WatchProviderRegion } from '../types/tmdb'
-import { providerLogoUrl } from '../utils/images'
-import { dedupeProviders } from '../utils/media'
+import type { WatchProviderRegion } from '../../types/tmdb'
+import { providerLogoUrl } from '../../utils/images'
+import { dedupeProviders } from '../../utils/media'
 
 export function WatchProviders({ providers }: { providers?: WatchProviderRegion }) {
   if (!providers) {
