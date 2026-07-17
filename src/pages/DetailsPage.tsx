@@ -38,7 +38,6 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   )
   const request = useRequest(loader)
   const [trailerOpen, setTrailerOpen] = useState(false)
-  const [playerOpen, setPlayerOpen] = useState(false)
   const [mediaSources, setMediaSources] = useState<MediaSource[] | null>(null)
   const [sourceError, setSourceError] = useState(false)
   const { isFavourite, toggleFavourite } = useFavourites()
@@ -149,20 +148,18 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                 <span role="status" className="inline-flex min-h-12 items-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-400">
                   Checking authorised playback…
                 </span>
-              ) : mediaSources.length > 0 ? (
+              ) : (
                 <button
                   type="button"
                   onClick={() => {
-                    setPlayerOpen(true)
-                    setTimeout(() => {
-                      document.getElementById('streaming-player')?.scrollIntoView({ behavior: 'smooth' })
-                    }, 100)
+                    document.getElementById('streaming-player')?.scrollIntoView({ behavior: 'smooth' })
                   }}
                   className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-brand-400 px-5 font-black text-zinc-950 transition hover:bg-brand-500"
                 >
-                  <Play size={18} fill="currentColor" aria-hidden="true" />Watch authorised video
+                  <Play size={18} fill="currentColor" aria-hidden="true" />
+                  {mediaSources.length > 0 ? 'Watch authorised video' : 'View video player'}
                 </button>
-              ) : null}
+              )}
               {trailer && (
                 <button
                   type="button"
@@ -194,7 +191,13 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
       </div>
 
       <div className="mx-auto mt-14 max-w-7xl space-y-14 px-4 sm:px-6 lg:px-8">
-        {playerOpen && mediaSources && mediaSources.length > 0 && (
+        {mediaSources === null ? (
+          <section id="streaming-player" aria-labelledby="player-loading-heading" className="scroll-mt-20 rounded-3xl border border-white/8 bg-white/[0.025] p-5 sm:p-7">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Video player</p>
+            <h2 id="player-loading-heading" className="mt-1 text-xl font-black text-white">Checking playback availability…</h2>
+            <div className="mt-4 aspect-video animate-pulse rounded-2xl bg-black ring-1 ring-white/10" />
+          </section>
+        ) : (
           <StreamingPlayer
             id={id}
             mediaType={mediaType}

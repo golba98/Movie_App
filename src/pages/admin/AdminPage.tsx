@@ -5,7 +5,6 @@ import {
   LogOut,
   RefreshCw,
   Search,
-  ShieldCheck,
   UserPlus,
   Users,
 } from 'lucide-react'
@@ -13,6 +12,7 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { ApiClientError, apiRequest } from '../../api/client'
 import { AdminMediaSourceCatalog } from '../../components/admin/AdminMediaSourceCatalog'
+import { AuthError, AuthField, AuthFieldGroup, AuthLayout, AuthSubmitButton } from '../../components/auth/AuthLayout'
 import { Logo } from '../../components/layout/Logo'
 import type { AuditEvent, ViewerAccount } from '../../types/account'
 
@@ -261,22 +261,33 @@ export function AdminPage() {
 
   if (!authenticated) {
     return (
-      <main className="auth-surface min-h-dvh px-4 py-8 sm:grid sm:place-items-center">
-        <section className="glass-panel mx-auto w-full max-w-md rounded-[2rem] p-6 sm:p-9">
-          <div className="flex justify-center"><Logo /></div>
-          <div className="mx-auto mt-8 grid size-14 place-items-center rounded-2xl bg-white text-zinc-950"><ShieldCheck aria-hidden="true" /></div>
-          <h1 className="mt-5 text-center text-3xl font-semibold tracking-tight">Administrator</h1>
-          <p className="mt-2 text-center text-sm leading-6 text-zinc-400">Use the Cloudflare administrator password to maintain viewer accounts.</p>
-          <form onSubmit={signIn} className="mt-7 space-y-5">
-            <label className="block text-sm font-medium">Administrator password
-              <input required type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} className="form-input mt-2" />
-            </label>
-            {error && <p role="alert" className="rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-200">{error}</p>}
-            <button type="submit" disabled={busyId === 'login'} className="primary-button w-full justify-center">{busyId === 'login' ? 'Signing in…' : 'Open admin'}</button>
-          </form>
-          <Link to="/" className="mt-5 flex min-h-11 items-center justify-center gap-2 rounded-xl text-sm text-zinc-400 hover:text-white"><ArrowLeft size={16} aria-hidden="true" />Back to Fedora Movies</Link>
-        </section>
-      </main>
+      <AuthLayout
+        eyebrow="Admin console"
+        title="Administrator"
+        subtitle="Use the Cloudflare administrator password to maintain viewer accounts."
+        footer={
+          <Link to="/" className="inline-flex items-center gap-1.5 text-zinc-400 transition-colors hover:text-white">
+            <ArrowLeft size={14} aria-hidden="true" />Back to Fedora Movies
+          </Link>
+        }
+      >
+        <form onSubmit={signIn} className="mt-8 space-y-4">
+          <AuthFieldGroup>
+            <AuthField
+              id="admin-password"
+              label="Administrator password"
+              type="password"
+              autoComplete="current-password"
+              value={adminPassword}
+              onChange={setAdminPassword}
+            />
+          </AuthFieldGroup>
+
+          {error && <AuthError message={error} />}
+
+          <AuthSubmitButton submitting={busyId === 'login'} pendingLabel="Signing in…">Open admin</AuthSubmitButton>
+        </form>
+      </AuthLayout>
     )
   }
 
