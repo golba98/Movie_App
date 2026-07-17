@@ -12,6 +12,17 @@ export function useRequest<T>(loader: (signal: AbortSignal) => Promise<T>) {
   const [state, setState] = useState<RequestState<T>>(initialState)
   const [attempt, setAttempt] = useState(0)
 
+  // Reset to the loading state synchronously (during render) whenever the loader
+  // identity changes — e.g. selecting a different movie. Without this, the render
+  // that first sees the new loader still holds the *previous* result with
+  // loading:false, so the old item can paint for a frame before the fetch effect
+  // runs. Clearing here guarantees the next selection never flashes stale data.
+  const [tracked, setTracked] = useState({ loader })
+  if (tracked.loader !== loader) {
+    setTracked({ loader })
+    setState(initialState)
+  }
+
   useEffect(() => {
     const controller = new AbortController()
     setState((current) => ({ ...current, loading: true, error: null }))
