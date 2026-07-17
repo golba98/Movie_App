@@ -14,6 +14,7 @@ import { assertSameOrigin, errorResponse, methodNotAllowed } from './http'
 import {
   createMediaSource,
   deleteMediaSource,
+  extractStreamEndpoint,
   listMediaSourcesForAdmin,
   listMediaSourcesForViewer,
   updateMediaSource,
@@ -94,6 +95,10 @@ async function handleApi(request: Request, env: Env) {
     return routeMethod(request, {
       POST: () => revokeAccountSessions(request, env, decodeURIComponent(revokeMatch[1])),
     })
+  }
+
+  if (path === '/api/media-sources/extract') {
+    return routeMethod(request, { GET: () => extractStreamEndpoint(request, env) })
   }
 
   if (path === '/api/favourites') {

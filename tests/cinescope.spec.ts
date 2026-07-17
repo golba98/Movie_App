@@ -183,6 +183,11 @@ async function mockTmdb(page: Page) {
   })
   await page.route('**/api/media-sources/**', async (route) => {
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/media-sources/extract') {
+      const url = new URL(route.request().url())
+      const targetUrl = url.searchParams.get('url') ?? ''
+      return route.fulfill({ json: { data: { extractedUrl: targetUrl } } })
+    }
     const match = path.match(/^\/api\/media-sources\/(movie|tv)\/(\d+)$/)
     const sources = match
       ? authorisedMediaSources.filter((source) => source.mediaType === match[1] && source.tmdbId === Number(match[2]))
