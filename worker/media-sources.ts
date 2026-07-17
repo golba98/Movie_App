@@ -421,7 +421,6 @@ async function extractDirectPlayerUrl(url: string): Promise<string | null> {
       return `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`
     }
   }
-
   try {
     const res = await fetch(url, {
       method: 'GET',
