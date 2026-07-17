@@ -97,9 +97,11 @@ export function StreamingPlayer({
   const iframeRevealTimerRef = useRef<number | null>(null)
 
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+  const [failedSourceIds, setFailedSourceIds] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     setSelectedSourceId(null)
+    setFailedSourceIds(new Set())
     setInlinePlaybackRequested(false)
   }, [id, activeSeason, activeEpisode])
 
@@ -153,12 +155,20 @@ export function StreamingPlayer({
 
   const activeSource = useMemo(() => {
     if (playableSources.length === 0) return undefined
+    const nonFailedSources = playableSources.filter((s) => !failedSourceIds.has(s.id))
+    if (nonFailedSources.length > 0) {
+      if (selectedSourceId) {
+        const selected = nonFailedSources.find((s) => s.id === selectedSourceId)
+        if (selected) return selected
+      }
+      return nonFailedSources[0]
+    }
     if (selectedSourceId) {
       const selected = playableSources.find((s) => s.id === selectedSourceId)
       if (selected) return selected
     }
     return playableSources[0]
-  }, [playableSources, selectedSourceId])
+  }, [playableSources, selectedSourceId, failedSourceIds])
   const activeSourceIsDynamic = isDynamicSource(activeSource)
   const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
 
@@ -203,6 +213,7 @@ export function StreamingPlayer({
       return
     }
 
+    const currentSource = activeSource
     const controller = new AbortController()
     let timedOut = false
     const timeout = window.setTimeout(() => {
@@ -215,14 +226,23 @@ export function StreamingPlayer({
     setExtractedUrl(null)
 
     apiRequest<{ extractedUrl: string | null }>(
-      `/api/media-sources/extract?url=${encodeURIComponent(activeSource.sourceUrl)}`,
+      `/api/media-sources/extract?url=${encodeURIComponent(currentSource.sourceUrl)}`,
       { signal: controller.signal },
     )
       .then((data) => {
         window.clearTimeout(timeout)
-        if (!isEmbeddableUrl(data.extractedUrl, activeSource.sourceUrl)) {
-          setDynamicPlayerStatus('error')
-          setDynamicPlayerError('This source did not return a usable embedded player. You can retry or exit safely.')
+        if (!isEmbeddableUrl(data.extractedUrl, currentSource.sourceUrl)) {
+          const otherSource = playableSources.find((s) => s.id !== currentSource.id && !failedSourceIds.has(s.id))
+          if (otherSource) {
+            setFailedSourceIds((prev) => {
+              const next = new Set(prev)
+              next.add(currentSource.id)
+              return next
+            })
+          } else {
+            setDynamicPlayerStatus('error')
+            setDynamicPlayerError('This source did not return a usable embedded player. You can retry or exit safely.')
+          }
           return
         }
         setExtractedUrl(data.extractedUrl)
@@ -232,19 +252,28 @@ export function StreamingPlayer({
         window.clearTimeout(timeout)
         if (controller.signal.aborted && !timedOut) return
         if (!timedOut) console.error('Extractor failed:', error)
-        setDynamicPlayerStatus('error')
-        setDynamicPlayerError(
-          timedOut
-            ? 'The player took too long to prepare. You can retry or exit safely.'
-            : 'The player could not be prepared. You can retry or exit safely.',
-        )
+        const otherSource = playableSources.find((s) => s.id !== currentSource.id && !failedSourceIds.has(s.id))
+        if (otherSource) {
+          setFailedSourceIds((prev) => {
+            const next = new Set(prev)
+            next.add(currentSource.id)
+            return next
+          })
+        } else {
+          setDynamicPlayerStatus('error')
+          setDynamicPlayerError(
+            timedOut
+              ? 'The player took too long to prepare. You can retry or exit safely.'
+              : 'The player could not be prepared. You can retry or exit safely.',
+          )
+        }
       })
 
     return () => {
       window.clearTimeout(timeout)
       controller.abort()
     }
-  }, [activeSource, activeSourceIsDynamic, dynamicPlaybackRequested, extractionAttempt])
+  }, [activeSource, activeSourceIsDynamic, dynamicPlaybackRequested, extractionAttempt, playableSources, failedSourceIds])
 
   useEffect(() => {
     setIframeLoaded(false)
@@ -261,15 +290,25 @@ export function StreamingPlayer({
   }, [dynamicPlayerStatus, extractedUrl])
 
   useEffect(() => {
-    if (dynamicPlayerStatus !== 'ready' || !extractedUrl || iframeLoaded) return
+    if (dynamicPlayerStatus !== 'ready' || !extractedUrl || iframeLoaded || !activeSource) return
 
+    const currentSource = activeSource
     const timeout = window.setTimeout(() => {
-      setDynamicPlayerStatus('error')
-      setDynamicPlayerError('The embedded player did not finish loading. You can retry or stop safely.')
+      const otherSource = playableSources.find((s) => s.id !== currentSource.id && !failedSourceIds.has(s.id))
+      if (otherSource) {
+        setFailedSourceIds((prev) => {
+          const next = new Set(prev)
+          next.add(currentSource.id)
+          return next
+        })
+      } else {
+        setDynamicPlayerStatus('error')
+        setDynamicPlayerError('The embedded player did not finish loading. You can retry or stop safely.')
+      }
     }, IFRAME_LOAD_TIMEOUT_MS)
 
     return () => window.clearTimeout(timeout)
-  }, [dynamicPlayerStatus, extractedUrl, iframeLoaded])
+  }, [dynamicPlayerStatus, extractedUrl, iframeLoaded, activeSource, playableSources, failedSourceIds])
 
 
 
@@ -419,6 +458,11 @@ export function StreamingPlayer({
                   onClick={() => {
                     setInlinePlaybackRequested(false)
                     setSelectedSourceId(source.id)
+                    setFailedSourceIds((prev) => {
+                      const next = new Set(prev)
+                      next.delete(source.id)
+                      return next
+                    })
                   }}
                   className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 ${
                     activeSource?.id === source.id
@@ -487,7 +531,9 @@ export function StreamingPlayer({
                     <div role="status" className="absolute inset-0 z-10 grid place-items-center bg-black px-6 text-center">
                       <div>
                         <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
-                        <p className="mt-4 text-sm font-semibold text-zinc-300">Loading player…</p>
+                        <p className="mt-4 text-sm font-semibold text-zinc-300">
+                          Loading player ({activeSource.label.replace(' Stream (Dynamic)', '')})…
+                        </p>
                       </div>
                     </div>
                   )}
@@ -503,7 +549,12 @@ export function StreamingPlayer({
                     <div className="mt-5 flex flex-wrap justify-center gap-3">
                       <button
                         type="button"
-                        onClick={() => setExtractionAttempt((attempt) => attempt + 1)}
+                        onClick={() => {
+                          setFailedSourceIds(new Set())
+                          setMediaError(null)
+                          setDynamicPlayerError(null)
+                          setExtractionAttempt((attempt) => attempt + 1)
+                        }}
                         className="min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
                       >
                         Retry player
@@ -525,7 +576,9 @@ export function StreamingPlayer({
                 <div role="status" className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'aspect-video'}`}>
                   <div>
                     <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
-                    <p className="mt-4 text-sm font-semibold text-zinc-300">Preparing player…</p>
+                    <p className="mt-4 text-sm font-semibold text-zinc-300">
+                      Preparing player ({activeSource.label.replace(' Stream (Dynamic)', '')})…
+                    </p>
                   </div>
                 </div>
               )
@@ -557,10 +610,20 @@ export function StreamingPlayer({
                   }}
                   onError={(event) => {
                     const video = event.currentTarget
-                    setMediaError({
-                      sourceId: activeSource.id,
-                      message: video.error?.message || 'The authorised video could not be loaded. Check the source format and host response.',
-                    })
+                    const errorMessage = video.error?.message || 'The authorised video could not be loaded. Check the source format and host response.'
+                    const otherSource = playableSources.find((s) => s.id !== activeSource.id && !failedSourceIds.has(s.id))
+                    if (otherSource) {
+                      setFailedSourceIds((prev) => {
+                        const next = new Set(prev)
+                        next.add(activeSource.id)
+                        return next
+                      })
+                    } else {
+                      setMediaError({
+                        sourceId: activeSource.id,
+                        message: errorMessage,
+                      })
+                    }
                   }}
                 />
                 <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/95 via-black/70 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4">
