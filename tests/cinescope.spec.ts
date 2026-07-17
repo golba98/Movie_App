@@ -683,3 +683,81 @@ test('the watch button opens a full-viewport theater player and Escape only exit
   const restoredBox = await video.boundingBox()
   expect(restoredBox?.width).toBeLessThan(1280)
 })
+
+test('dynamic players load only after Watch and always leave the site recoverable', async ({ page }) => {
+  const wrapperUrl = 'https://flixbaba.mov/movie/1/dune-part-two/watch'
+  const embedUrl = 'https://player.example.test/embed/movie/1'
+  const dynamicSource = {
+    id: 'flixbaba-default',
+    mediaType: 'movie',
+    tmdbId: 1,
+    seasonNumber: null,
+    episodeNumber: null,
+    label: 'Flixbaba Stream (Dynamic)',
+    sourceUrl: wrapperUrl,
+    mimeType: 'video/mp4',
+    rightsBasis: 'licensed',
+    isDynamic: true,
+  }
+  let extractionRequests = 0
+  let wrapperRequests = 0
+  let releaseFirstExtraction = () => {}
+  const firstExtractionPending = new Promise<void>((resolve) => {
+    releaseFirstExtraction = resolve
+  })
+
+  await page.route('**/api/media-sources/movie/1', async (route) => {
+    await route.fulfill({ json: { data: { sources: [dynamicSource] } } })
+  })
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    extractionRequests += 1
+    if (extractionRequests === 1) {
+      await firstExtractionPending
+      return route.fulfill({ json: { data: { extractedUrl: null } } })
+    }
+    return route.fulfill({ json: { data: { extractedUrl: embedUrl } } })
+  })
+  await page.route('https://flixbaba.mov/**', async (route) => {
+    wrapperRequests += 1
+    await route.abort('blockedbyclient')
+  })
+  await page.route('https://player.example.test/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Test player</title>' })
+  })
+
+  await page.goto('/movie/1')
+  await expect(page.getByText('This external player loads only after you choose Watch or Theater mode.')).toBeVisible()
+  await expect(page.locator('#streaming-player iframe')).toHaveCount(0)
+  expect(extractionRequests).toBe(0)
+  expect(wrapperRequests).toBe(0)
+
+  await page.getByRole('button', { name: 'Watch Movie' }).click()
+  await expect(page.getByRole('status')).toContainText('Preparing player')
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeFocused()
+  await expect(page.locator('#streaming-player iframe')).toHaveCount(0)
+  await expect.poll(() => extractionRequests).toBe(1)
+  expect(wrapperRequests).toBe(0)
+
+  releaseFirstExtraction()
+  await expect(page.getByRole('alert')).toContainText('did not return a usable embedded player')
+  await expect(page.locator('#streaming-player iframe')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Retry player' }).click()
+  const iframe = page.locator('#streaming-player iframe')
+  await expect(iframe).toHaveAttribute('src', embedUrl)
+  await expect(iframe).not.toHaveAttribute('allowfullscreen', '')
+  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
+  expect(wrapperRequests).toBe(0)
+
+  await page.keyboard.press('Escape')
+  await expect(iframe).toHaveCount(0)
+  await expect(page.getByText('This external player loads only after you choose Watch or Theater mode.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Watch Movie' })).toBeFocused()
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('hidden')
+
+  await page.getByRole('button', { name: 'Add to favourites' }).click()
+  await expect(page.getByRole('button', { name: 'Remove favourite' })).toBeVisible()
+  await page.getByRole('button', { name: 'Close details' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('')
+})
