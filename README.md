@@ -57,11 +57,11 @@ Open the URL printed by Vite, then visit `/admin` to sign in and create the firs
 
 Use the **Authorised media catalog** in `/admin` to associate a direct MP4 or WebM URL with a TMDB movie or TV episode. Sources may be a same-origin path or an HTTPS URL. A remote media host must provide a browser-compatible codec, correct content type, and byte-range support; Fedora Movies deliberately does not proxy remote video.
 
-Optional dynamic search providers are configured separately in `/admin`. The Worker checks the configured provider, resolves its external embed only after the viewer presses **Watch**, and returns an error if it cannot prepare the player within 15 seconds. The raw provider page is not embedded, and leaving theater mode destroys the iframe so the rest of the application remains usable.
+Optional dynamic search providers are configured separately in `/admin`. The Worker checks the configured provider and resolves its external embed only after the viewer presses **Play**. The player stays dark while the external frame prepares, loads inline first, and can then expand to Theater mode without restarting. The raw provider page is not embedded; the frame is sandboxed and cannot use its own fullscreen permission.
 
 The player:
 
-- keeps one native `<video controls playsInline preload="metadata">` element mounted while playback controls and theater mode change;
+- keeps one native `<video playsInline preload="metadata">` element mounted while app-owned playback controls and Theater mode change;
 - does not react to window blur, page visibility, capture state, Discord, Zoom, OBS, or developer tools;
 - does not render video through a canvas or place an opaque capture overlay over it;
 - does not set a `crossorigin` attribute, because doing so without matching media-server CORS headers can break otherwise valid direct playback; and

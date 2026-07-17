@@ -6,6 +6,8 @@ type MediaType = 'movie' | 'tv'
 type MediaMimeType = 'video/mp4' | 'video/webm'
 type RightsBasis = 'owned' | 'licensed'
 
+const EXTRACTOR_REQUEST_TIMEOUT_MS = 12_000
+
 interface MediaSourceRow {
   id: string
   media_type: MediaType
@@ -393,7 +395,7 @@ export async function deleteMediaSource(request: Request, env: Env, id: string) 
   return json({ removed: true })
 }
 
-async function extractDirectPlayerUrl(url: string): Promise<string | null> {
+export async function extractDirectPlayerUrl(url: string, signal: AbortSignal): Promise<string | null> {
   // Direct parsing for known dynamic hosts to avoid failing on client-side JS pages or 404 wrappers
   const isDynamicHost = url.includes('flixbaba') || url.includes('soap2day')
   if (isDynamicHost) {
@@ -427,6 +429,7 @@ async function extractDirectPlayerUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
       method: 'GET',
+      signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       },
@@ -459,6 +462,7 @@ async function extractDirectPlayerUrl(url: string): Promise<string | null> {
 
     return null
   } catch (e) {
+    if (signal.aborted) return null
     console.error(`Failed to extract player from ${url}:`, e)
     return null
   }
@@ -477,7 +481,10 @@ export async function extractStreamEndpoint(request: Request, env: Env) {
     throw new ApiError(400, 'INVALID_URL', 'Use a valid HTTPS target URL.')
   }
 
-  const extractedUrl = await extractDirectPlayerUrl(cleanedUrl)
+  const extractedUrl = await extractDirectPlayerUrl(
+    cleanedUrl,
+    AbortSignal.any([request.signal, AbortSignal.timeout(EXTRACTOR_REQUEST_TIMEOUT_MS)]),
+  )
   return json({ extractedUrl })
 }
 
