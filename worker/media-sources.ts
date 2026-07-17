@@ -387,6 +387,40 @@ export async function deleteMediaSource(request: Request, env: Env, id: string) 
 }
 
 async function extractDirectPlayerUrl(url: string): Promise<string | null> {
+  // Direct parsing for known dynamic hosts to avoid failing on client-side JS pages or 404 wrappers
+  if (url.includes('flixbaba')) {
+    const movieMatch = url.match(/\/movie\/(\d+)/)
+    const tvMatch = url.match(/\/tv\/(\d+)/)
+    if (movieMatch && !url.includes('/season/')) {
+      const tmdbId = movieMatch[1]
+      return `https://vidsrc.to/embed/movie/${tmdbId}`
+    } else if (tvMatch) {
+      const tmdbId = tvMatch[1]
+      const seasonMatch = url.match(/\/season\/(\d+)/)
+      const season = seasonMatch ? seasonMatch[1] : '1'
+      try {
+        const parsed = new URL(url)
+        const episode = parsed.searchParams.get('e') || '1'
+        return `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`
+      } catch {
+        return `https://vidsrc.to/embed/tv/${tmdbId}/${season}/1`
+      }
+    }
+  }
+
+  if (url.includes('soap2day')) {
+    const movieMatch = url.match(/\/embed\/movie\/(\d+)/)
+    const tvMatch = url.match(/\/embed\/tv\/(\d+)\/(\d+)\/(\d+)/)
+    if (movieMatch) {
+      const tmdbId = movieMatch[1]
+      return `https://vidsrc.to/embed/movie/${tmdbId}`
+    } else if (tvMatch) {
+      const tmdbId = tvMatch[1]
+      const season = tvMatch[2]
+      const episode = tvMatch[3]
+      return `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`
+    }
+  }
   try {
     const res = await fetch(url, {
       method: 'GET',
