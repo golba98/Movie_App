@@ -44,12 +44,12 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const [theaterMode, setTheaterMode] = useState(false)
   const { isFavourite, toggleFavourite } = useFavourites()
 
-  // Transitions & loading delay states
+  // Entrance / crossfade states
   const [isMounted, setIsMounted] = useState(false)
   const [isClosing, setIsClosing] = useState(false)
-  const [showSkeleton, setShowSkeleton] = useState(false)
-  const [isFadingOutSkeleton, setIsFadingOutSkeleton] = useState(false)
+  const [skeletonMounted, setSkeletonMounted] = useState(true)
   const [backdropLoaded, setBackdropLoaded] = useState(false)
+  const [backdropError, setBackdropError] = useState(false)
 
   const isDataReady = !request.loading && request.data !== null
 
@@ -66,30 +66,23 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
     setIsMounted(true)
   }, [])
 
-  // Delay skeleton display and control crossfade
+  // Crossfade linger: the skeleton always renders while data is not ready (see the
+  // render condition below — that part is synchronous so switching titles never
+  // exposes an empty shell). This flag only keeps it mounted for the fade-out once
+  // the details become ready, then unmounts it.
   useEffect(() => {
-    if (request.loading) {
-      setShowSkeleton(false)
-      setIsFadingOutSkeleton(false)
-      const timer = setTimeout(() => {
-        setShowSkeleton(true)
-      }, 130)
-      return () => clearTimeout(timer)
-    } else if (isDataReady) {
-      if (showSkeleton) {
-        setIsFadingOutSkeleton(true)
-        const timer = setTimeout(() => {
-          setShowSkeleton(false)
-          setIsFadingOutSkeleton(false)
-        }, 200)
-        return () => clearTimeout(timer)
-      }
+    if (!isDataReady) {
+      setSkeletonMounted(true)
+      return
     }
-  }, [request.loading, isDataReady, showSkeleton])
+    const timer = setTimeout(() => setSkeletonMounted(false), 220)
+    return () => clearTimeout(timer)
+  }, [isDataReady])
 
-  // Reset backdrop loaded state on ID change
+  // Reset image states on ID change so a new selection re-crossfades its artwork.
   useEffect(() => {
     setBackdropLoaded(false)
+    setBackdropError(false)
   }, [id])
 
   const handleClose = useCallback(() => {
@@ -100,7 +93,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
       } else {
         navigate('/')
       }
-    }, 300)
+    }, 200)
   }, [navigate])
 
   // Handle escape key closing. Theater mode owns Escape while it is open, so the
@@ -166,7 +159,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4 sm:p-6 md:p-10">
       {/* Backdrop overlay */}
       <div
-        className={`absolute inset-0 bg-zinc-950/80 backdrop-blur-md transition-opacity duration-300 ease-out ${
+        className={`absolute inset-0 bg-zinc-950/80 backdrop-blur-md transition-opacity duration-200 ease-out ${
           isMounted && !isClosing ? 'opacity-100' : 'opacity-0'
         }`}
         onClick={handleClose}
@@ -179,10 +172,10 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
           this max-w-5xl panel. The transition is dropped too, otherwise `scale: 1`
           lingers for the duration while animating out to `none`. */}
       <div
-        className={`relative z-10 w-full max-w-5xl h-full max-h-[92vh] sm:max-h-[85vh] overflow-y-auto rounded-3xl border border-white/10 bg-zinc-950 shadow-2xl ease-out ${
+        className={`relative z-10 w-full max-w-5xl h-full max-h-[92vh] sm:max-h-[85vh] overflow-y-auto [scrollbar-gutter:stable] rounded-3xl border border-white/10 bg-zinc-950 shadow-2xl ease-out ${
           theaterMode
             ? 'opacity-100 transition-none'
-            : `transition-all duration-300 ${
+            : `transition-all duration-200 ${
                 isMounted && !isClosing
                   ? 'opacity-100 translate-y-0 scale-100'
                   : 'opacity-0 translate-y-3 scale-[0.985]'
@@ -203,25 +196,32 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
         </button>
 
         {/* Content & Crossfade Layers */}
+        {/* Loading and loaded states share this parent. The skeleton is in normal
+            flow while pending, so it reserves the layout and the shell is never
+            empty; once data is ready the loaded content takes the flow and the
+            skeleton is promoted to an absolute overlay that fades out over it,
+            keeping the panel geometry and close button stationary throughout. */}
         <div className="relative">
-          {/* Loaded details content wrapper */}
-          <div className={`transition-opacity duration-200 ${isDataReady ? 'opacity-100' : 'opacity-0'}`}>
-            {isDataReady && data && item && (
-              <article className="min-w-0 pb-14 sm:pb-20">
+          {/* Loaded details content */}
+          {isDataReady && data && item && (
+            <article className="min-w-0 pb-14 sm:pb-20">
                 <header className="relative isolate min-h-[260px] overflow-hidden sm:min-h-[390px] lg:min-h-[470px]">
-                  {backdrop ? (
+                  {/* Gradient fill sits behind the backdrop as the reserved
+                      fallback: it shows before the image decodes and stays if the
+                      image fails, so the fixed-height header never goes blank. */}
+                  <div className="absolute inset-0 -z-30 bg-gradient-to-br from-brand-600/25 via-zinc-900 to-zinc-950" />
+                  {backdrop && !backdropError && (
                     <img
                       src={backdrop}
                       alt=""
                       role="presentation"
-                      className={`absolute inset-0 -z-20 size-full object-cover transition-opacity duration-350 ease-out ${
+                      className={`absolute inset-0 -z-20 size-full object-cover transition-opacity duration-300 ease-out ${
                         backdropLoaded ? 'opacity-100' : 'opacity-0'
                       }`}
                       fetchPriority="high"
                       onLoad={() => setBackdropLoaded(true)}
+                      onError={() => setBackdropError(true)}
                     />
-                  ) : (
-                    <div className="absolute inset-0 -z-20 bg-gradient-to-br from-brand-600/25 via-zinc-900 to-zinc-950" />
                   )}
                   <div className="absolute inset-0 -z-10 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-black/20" />
                 </header>
@@ -341,17 +341,17 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                 </div>
                 <TrailerModal trailer={trailerOpen ? trailer : null} onClose={() => setTrailerOpen(false)} />
               </article>
-            )}
-          </div>
+          )}
 
           {/* Skeleton Layer */}
-          {showSkeleton && (
+          {(!isDataReady || skeletonMounted) && !request.error && (
             <div
-              className={`absolute inset-0 z-10 bg-zinc-950 pointer-events-none transition-opacity duration-200 ${
-                isFadingOutSkeleton ? 'opacity-0' : 'opacity-100'
+              aria-hidden={isDataReady}
+              className={`z-10 bg-zinc-950 pointer-events-none transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+                isDataReady ? 'absolute inset-0 opacity-0' : 'opacity-100'
               }`}
             >
-              <div className="min-w-0 pb-14 sm:pb-20 animate-pulse">
+              <div className="min-w-0 pb-14 sm:pb-20 animate-pulse motion-reduce:animate-none">
                 <header className="relative min-h-[260px] overflow-hidden sm:min-h-[390px] lg:min-h-[470px] bg-zinc-900/50">
                   <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-black/20" />
                 </header>
