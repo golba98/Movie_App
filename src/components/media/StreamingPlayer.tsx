@@ -170,6 +170,8 @@ export function StreamingPlayer({
     return playableSources[0]
   }, [playableSources, selectedSourceId, failedSourceIds])
   const activeSourceIsDynamic = isDynamicSource(activeSource)
+  const activeSourceIndex = playableSources.findIndex((s) => s.id === activeSource?.id)
+  const activeSourceLabel = activeSourceIndex !== -1 ? `Server ${activeSourceIndex + 1}` : (activeSource?.label ?? '')
   const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
 
   const availableSeasons = useMemo(() => {
@@ -449,30 +451,35 @@ export function StreamingPlayer({
           </div>
 
           {playableSources.length > 1 && (
-            <div className="mb-4 flex flex-wrap items-center gap-2 px-1">
-              <span className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 mr-1">Source Server:</span>
-              {playableSources.map((source) => (
-                <button
-                  key={source.id}
-                  type="button"
-                  onClick={() => {
-                    setInlinePlaybackRequested(false)
-                    setSelectedSourceId(source.id)
-                    setFailedSourceIds((prev) => {
-                      const next = new Set(prev)
-                      next.delete(source.id)
-                      return next
-                    })
-                  }}
-                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 ${
-                    activeSource?.id === source.id
-                      ? 'bg-emerald-500/12 border border-emerald-400/30 text-emerald-300 shadow-md shadow-emerald-500/10'
-                      : 'bg-white/5 border border-white/5 text-zinc-400 hover:bg-white/10 hover:border-white/10 hover:text-zinc-200'
-                  }`}
-                >
-                  {source.label.replace(' Stream (Dynamic)', '')}
-                </button>
-              ))}
+            <div className="mb-6 flex flex-wrap items-center gap-3.5 px-1 py-1">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Source Server</span>
+              <div className="inline-flex rounded-full bg-zinc-950/80 p-1 ring-1 ring-white/10 backdrop-blur">
+                {playableSources.map((source, index) => {
+                  const isActive = activeSource?.id === source.id
+                  return (
+                    <button
+                      key={source.id}
+                      type="button"
+                      onClick={() => {
+                        setInlinePlaybackRequested(false)
+                        setSelectedSourceId(source.id)
+                        setFailedSourceIds((prev) => {
+                          const next = new Set(prev)
+                          next.delete(source.id)
+                          return next
+                        })
+                      }}
+                      className={`inline-flex min-h-8 items-center rounded-full px-4 text-xs font-bold transition-all duration-300 ease-out active:scale-95 ${
+                        isActive
+                          ? 'bg-white text-zinc-950 shadow-lg shadow-white/10 font-semibold'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Server {index + 1}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           )}
 
@@ -532,7 +539,7 @@ export function StreamingPlayer({
                       <div>
                         <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
                         <p className="mt-4 text-sm font-semibold text-zinc-300">
-                          Loading player ({activeSource.label.replace(' Stream (Dynamic)', '')})…
+                          Loading player ({activeSourceLabel})…
                         </p>
                       </div>
                     </div>
@@ -577,7 +584,7 @@ export function StreamingPlayer({
                   <div>
                     <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
                     <p className="mt-4 text-sm font-semibold text-zinc-300">
-                      Preparing player ({activeSource.label.replace(' Stream (Dynamic)', '')})…
+                      Preparing player ({activeSourceLabel})…
                     </p>
                   </div>
                 </div>

@@ -893,8 +893,8 @@ test('player automatically falls back to the next available source if the first 
   const iframe = page.locator('#streaming-player iframe')
   await expect(iframe).toHaveAttribute('src', embedUrl)
   
-  const activeSourceButton = page.locator('#streaming-player button', { hasText: 'Server Two' })
-  await expect(activeSourceButton).toHaveClass(/bg-emerald-500/)
+  const activeSourceButton = page.locator('#streaming-player button', { hasText: 'Server 2' })
+  await expect(activeSourceButton).toHaveClass(/bg-white/)
 
   expect(extractionRequests).toEqual([
     'https://serverone.test/movie/1',
