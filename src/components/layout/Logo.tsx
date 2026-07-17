@@ -6,7 +6,7 @@ export function Logo() {
     <Link
       to="/"
       className="inline-flex items-center rounded text-[15px] text-[#f5f5f5] transition-colors hover:text-white"
-      aria-label="F Movies home"
+      aria-label="Fedora Movies home"
     >
       <BrandMark />
     </Link>
