@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle, CircleStop, Info, MonitorUp, Pla
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useVideoDiagnostics } from '../hooks/useVideoDiagnostics'
+import { PLAYBACK_CHAIN_DOMAINS } from '../utils/playbackDomains'
 
 const TEST_MEDIA_URL = '/test-media/capture-test.mp4'
 
@@ -104,9 +105,8 @@ export function CaptureCompatibilityPage() {
       })
     }
 
-    // 4. Reachability/Connection Tests for Common Domains
-    const domainsToTest = ['https://vidsrc.to', 'https://vidsrc.xyz', 'https://vidsrc.me']
-    const testPromises = domainsToTest.map(async (domain) => {
+    // 4. Reachability/Connection Tests for the playback chain
+    const testPromises = PLAYBACK_CHAIN_DOMAINS.map(async (domain) => {
       try {
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 6000)

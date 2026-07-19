@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle, Info, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { PLAYBACK_CHAIN_DOMAINS } from '../../utils/playbackDomains'
 
 interface DiagnosticsResult {
   title: string
@@ -89,9 +90,8 @@ export function PlayerDiagnosticsModal({ isOpen, onClose, resolvedUrl }: PlayerD
       recommendation: resolvedUrl ? undefined : 'Start playback on a movie or episode to resolve the streaming source.',
     })
 
-    // 5. Reachability/Connection Tests for Common Domains
-    const domainsToTest = ['https://vidsrc.to', 'https://vidsrc.xyz', 'https://vidsrc.me']
-    const testPromises = domainsToTest.map(async (domain) => {
+    // 5. Reachability/Connection Tests for the playback chain
+    const testPromises = PLAYBACK_CHAIN_DOMAINS.map(async (domain) => {
       try {
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 6000)
