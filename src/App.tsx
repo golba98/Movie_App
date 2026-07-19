@@ -11,6 +11,8 @@ import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/auth/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { SearchPage } from './pages/SearchPage'
+import { WatchPartyJoinPage, WatchPartyRoomPage } from './pages/WatchPartyPages'
+import { watchPartyEnabled } from './utils/featureFlags'
 
 export default function App() {
   const location = useLocation()
@@ -30,6 +32,12 @@ export default function App() {
       <Routes location={resolvedBackground || location}>
         <Route path="login" element={<LoginPage />} />
         <Route path="admin" element={<AdminPage />} />
+        {watchPartyEnabled && (
+          <>
+            <Route path="watch-party/join" element={<WatchPartyJoinPage />} />
+            <Route path="watch-party/:roomId" element={<WatchPartyRoomPage />} />
+          </>
+        )}
         <Route element={<RequireViewer />}>
           <Route path="change-password" element={<ChangePasswordPage />} />
           <Route element={<RequireChangedPassword />}>

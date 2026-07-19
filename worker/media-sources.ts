@@ -6,6 +6,26 @@ type MediaType = 'movie' | 'tv'
 type MediaMimeType = 'video/mp4' | 'video/webm'
 type RightsBasis = 'owned' | 'licensed'
 
+// How a resolved URL should be played. 'video' and 'hls' load into the app's own
+// <video> element and therefore participate in watch-party playback sync; 'embed'
+// is an opaque cross-origin iframe that cannot be synchronised.
+export type PlaybackKind = 'video' | 'hls' | 'embed'
+
+/** Classify a resolved URL by how it can be played, from its path extension. */
+export function classifyPlaybackKind(url: string): PlaybackKind {
+  let pathname = url
+  try {
+    pathname = new URL(url).pathname
+  } catch {
+    // Not an absolute URL; fall back to matching against the raw string.
+  }
+  if (/\.m3u8(?:$|[?#])/i.test(pathname) || /\.m3u8(?:$|[?#])/i.test(url)) return 'hls'
+  if (/\.(?:mp4|webm|mov|m4v)(?:$|[?#])/i.test(pathname) || /\.(?:mp4|webm|mov|m4v)(?:$|[?#])/i.test(url)) return 'video'
+  return 'embed'
+}
+
+const DIRECT_STREAM_PATTERN = /https?:\/\/[^"'\s<>\\]+?\.(?:m3u8|mp4|webm)(?:[?#][^"'\s<>\\]*)?/gi
+
 const EXTRACTOR_REQUEST_TIMEOUT_MS = 12_000
 const STREAM_RESOLUTION_CACHE_TTL_MS = 10 * 60 * 1_000
 
@@ -138,7 +158,7 @@ async function findMediaSource(db: D1Database, id: string) {
   return db.prepare('SELECT * FROM media_sources WHERE id = ?').bind(id).first<MediaSourceRow>()
 }
 
-function slugify(text: string): string {
+export function slugify(text: string): string {
   return text
     .toString()
     .toLowerCase()
@@ -150,7 +170,7 @@ function slugify(text: string): string {
     .replace(/-+/g, '-')
 }
 
-async function fetchTmdbTitle(env: Env, mediaType: string, tmdbId: number): Promise<string> {
+export async function fetchTmdbTitle(env: Env, mediaType: string, tmdbId: number): Promise<string> {
   const url = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}`
   const res = await fetch(url, {
     headers: {
@@ -166,7 +186,7 @@ async function fetchTmdbTitle(env: Env, mediaType: string, tmdbId: number): Prom
 }
 
 
-function buildProviderUrl(pattern: string, baseUrl: string, tmdbId: number, slug: string, mediaType: MediaType) {
+export function buildProviderUrl(pattern: string, baseUrl: string, tmdbId: number, slug: string, mediaType: MediaType) {
   let url = pattern
   if (!url) {
     url = mediaType === 'movie'
@@ -228,7 +248,7 @@ export async function listMediaSourcesForViewer(
           for (const { provider, providerUrl, isAvailable } of checks) {
             if (isAvailable) {
               sources.push({
-                id: provider.id,
+                id: `dynamic:${provider.id}:${mediaType}:${tmdbId}`,
                 mediaType,
                 tmdbId,
                 seasonNumber: null,
@@ -422,6 +442,14 @@ export async function extractDirectPlayerUrl(url: string, signal: AbortSignal): 
     if (res.status !== 200) return null
     const html = await res.text()
 
+    // 0. Prefer a directly playable stream (.m3u8 / .mp4 / .webm) if the page
+    //    exposes one — these load into the app's own <video> element and can be
+    //    synchronised, unlike an embedded iframe player.
+    const directMatches = html.match(DIRECT_STREAM_PATTERN)
+    if (directMatches && directMatches.length > 0) {
+      return directMatches[0].replace(/\\\//g, '/')
+    }
+
     // 1. Look for iframe src
     const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i)
     if (iframeMatch && iframeMatch[1]) {
@@ -453,7 +481,7 @@ export async function extractDirectPlayerUrl(url: string, signal: AbortSignal): 
   }
 }
 
-async function cachedPlayerUrl(db: D1Database, sourceUrl: string) {
+export async function cachedPlayerUrl(db: D1Database, sourceUrl: string) {
   const row = await db
     .prepare('SELECT extracted_url FROM stream_resolution_cache WHERE source_url = ? AND expires_at > ?')
     .bind(sourceUrl, Date.now())
@@ -461,7 +489,7 @@ async function cachedPlayerUrl(db: D1Database, sourceUrl: string) {
   return row?.extracted_url ?? null
 }
 
-async function resolveAndCachePlayerUrl(db: D1Database, sourceUrl: string) {
+export async function resolveAndCachePlayerUrl(db: D1Database, sourceUrl: string) {
   const existing = inFlightStreamResolutions.get(sourceUrl)
   if (existing) return existing
 

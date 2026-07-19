@@ -3,15 +3,23 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "start": "vite --open",
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "typecheck": "tsc -b --pretty false",
+    "build:watch-party": "VITE_ENABLE_WATCH_PARTY=true npm run build",
+    "typecheck": "tsc -b --pretty false && npm run typecheck -w @fedora-movies/watch-sync-extension",
     "lint": "eslint .",
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "test:extension": "npm test -w @fedora-movies/watch-sync-extension",
+    "test:extension:integration": "npm run test:integration -w @fedora-movies/watch-sync-extension",
+    "extension:build": "npm run build -w @fedora-movies/watch-sync-extension",
+    "extension:fixtures": "npm run fixtures -w @fedora-movies/watch-sync-extension",
     "db:migrate:local": "wrangler d1 migrations apply movie-streaming-app-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply movie-streaming-app-db --remote",
     "cf:types": "wrangler types",
@@ -19,6 +27,7 @@
     "deploy": "npm run build && npx wrangler deploy"
   },
   "dependencies": {
+    "hls.js": "^1.6.16",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
