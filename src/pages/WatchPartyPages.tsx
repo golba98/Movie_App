@@ -139,7 +139,7 @@ function SynchronizedPlayer({ state, playbackUrl, playbackKind, canControl, send
               allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
               allowFullScreen
               referrerPolicy="origin"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-popups-to-escape-sandbox"
             />
           </div>
           <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-xs leading-5 text-amber-100">

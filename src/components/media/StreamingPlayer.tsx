@@ -537,7 +537,7 @@ export function StreamingPlayer({
                     allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
                     allowFullScreen
                     referrerPolicy="origin"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-popups-to-escape-sandbox"
                     aria-label={`Video player for ${title}`}
                     onLoad={revealIframe}
                   />
