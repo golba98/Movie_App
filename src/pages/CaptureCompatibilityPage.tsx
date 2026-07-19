@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleStop, MonitorUp, Play, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle, CircleStop, Info, MonitorUp, Play, RefreshCw, ShieldAlert } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useVideoDiagnostics } from '../hooks/useVideoDiagnostics'
@@ -7,6 +7,13 @@ const TEST_MEDIA_URL = '/test-media/capture-test.mp4'
 
 type CaptureState = 'idle' | 'starting' | 'active' | 'stopped'
 
+interface DiagnosticsResult {
+  title: string
+  status: 'success' | 'warning' | 'error' | 'loading'
+  message: string
+  recommendation?: string
+}
+
 export function CaptureCompatibilityPage() {
   const originalRef = useRef<HTMLVideoElement>(null)
   const previewRef = useRef<HTMLVideoElement>(null)
@@ -14,6 +21,9 @@ export function CaptureCompatibilityPage() {
   const [captureState, setCaptureState] = useState<CaptureState>('idle')
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [captureDetails, setCaptureDetails] = useState<string | null>(null)
+
+  const [checking, setChecking] = useState(false)
+  const [checkResults, setCheckResults] = useState<DiagnosticsResult[]>([])
 
   useVideoDiagnostics(originalRef, 'capture-test:original', TEST_MEDIA_URL)
   useVideoDiagnostics(previewRef, 'capture-test:preview', '(display stream)', false)
@@ -30,6 +40,103 @@ export function CaptureCompatibilityPage() {
   useEffect(() => () => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
   }, [])
+
+  const runNetworkChecks = useCallback(async () => {
+    setChecking(true)
+    const newResults: DiagnosticsResult[] = []
+
+    // 1. Check Protocol
+    const isHttps = window.location.protocol === 'https:'
+    newResults.push({
+      title: 'Security Protocol (SSL/TLS)',
+      status: isHttps ? 'success' : 'warning',
+      message: `The app is running over ${window.location.protocol.toUpperCase() || 'HTTP'}.`,
+      recommendation: isHttps 
+        ? undefined 
+        : 'Modern browsers block Referer headers when loading HTTPS iframes from insecure HTTP pages. Access your app via HTTPS for best compatibility.',
+    })
+
+    // 2. Check Hostname / Origin (Domain vs Raw IP)
+    const hostname = window.location.hostname
+    const ipRegex = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/
+    const isIpAddress = ipRegex.test(hostname)
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
+
+    if (isIpAddress) {
+      newResults.push({
+        title: 'Referrer Origin (Local IP)',
+        status: 'error',
+        message: `Running on local IP address: ${hostname}`,
+        recommendation: 'Streaming resolvers (like VidSrc) reject referrers from raw IP addresses (e.g. 192.168.x.x) as unauthorized hotlinking. Access the app using an HTTPS tunnel (e.g., ngrok) or configure local hostnames/DNS.',
+      })
+    } else if (isLocalhost) {
+      newResults.push({
+        title: 'Referrer Origin (Localhost)',
+        status: 'success',
+        message: 'Running on localhost.',
+        recommendation: 'Localhost is typically whitelisted by resolvers, but this context is only accessible on the host machine. Mobile devices cannot access it without USB port forwarding (adb reverse).',
+      })
+    } else {
+      newResults.push({
+        title: 'Referrer Origin (Domain)',
+        status: 'success',
+        message: `Running on domain name: ${hostname}`,
+      })
+    }
+
+    // 3. User Agent / ITP Detection
+    const ua = navigator.userAgent
+    const isIOS = /iPad|iPhone|iPod/.test(ua)
+    const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua)
+    
+    if (isIOS || isSafari) {
+      newResults.push({
+        title: 'iOS Safari WebKit / ITP Protection',
+        status: 'warning',
+        message: 'iOS/Safari browser environment detected.',
+        recommendation: 'Apple\'s Intelligent Tracking Prevention (ITP) aggressively strips Referer headers in cross-origin iframes. Ensure you are accessing the app over HTTPS, or check that "Prevent Cross-Site Tracking" is temporarily disabled in Safari settings during local development.',
+      })
+    } else {
+      newResults.push({
+        title: 'Browser Environment',
+        status: 'success',
+        message: 'Standard desktop or Android browser detected.',
+      })
+    }
+
+    // 4. Reachability/Connection Tests for Common Domains
+    const domainsToTest = ['https://vidsrc.to', 'https://vidsrc.xyz', 'https://vidsrc.me']
+    const testPromises = domainsToTest.map(async (domain) => {
+      try {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 6000)
+        await fetch(domain, { mode: 'no-cors', signal: controller.signal })
+        clearTimeout(timeout)
+        return {
+          title: `Connection to ${domain.replace('https://', '')}`,
+          status: 'success' as const,
+          message: 'Server is reachable from this network.',
+        }
+      } catch {
+        return {
+          title: `Connection to ${domain.replace('https://', '')}`,
+          status: 'error' as const,
+          message: 'Connection timed out or failed.',
+          recommendation: 'The streaming provider domain may be down, or blocked by your ISP, local router, or ad-blocker DNS (e.g. Pi-hole/AdGuard). Try testing on a different network or switching on/off a VPN.',
+        }
+      }
+    })
+
+    const testResults = await Promise.all(testPromises)
+    newResults.push(...testResults)
+
+    setCheckResults(newResults)
+    setChecking(false)
+  }, [])
+
+  useEffect(() => {
+    void runNetworkChecks()
+  }, [runNetworkChecks])
 
   const startCapture = async () => {
     setCaptureError(null)
@@ -86,13 +193,74 @@ export function CaptureCompatibilityPage() {
       </Link>
 
       <header className="mt-5 max-w-4xl">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-400">Capture diagnostics</p>
-        <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">Screen-capture compatibility test</h1>
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-400">Diagnostics</p>
+        <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">System Diagnostics</h1>
         <p className="mt-4 max-w-3xl leading-7 text-zinc-400">
-          This page uses an original, unencrypted MP4 and normal HTML5 video. Start it playing, then capture this tab, window, or display and compare the preview. The test never pauses or hides the original video.
+          Diagnose player network, referrer policy, tracking protections, and screen capture compatibility.
         </p>
       </header>
 
+      {/* Network & Referrer Diagnostics Section */}
+      <section className="mt-10 rounded-3xl border border-white/8 bg-white/[0.025] p-5 sm:p-7" aria-labelledby="network-diagnostics-heading">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-brand-400">Policy & Connectivity Checks</p>
+            <h2 id="network-diagnostics-heading" className="mt-1 text-2xl font-black">Player Network & Referrer Diagnostics</h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => void runNetworkChecks()}
+            disabled={checking}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-black text-white hover:bg-white/10 hover:text-white active:scale-95 disabled:opacity-50 transition duration-200"
+          >
+            <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+            Re-run checks
+          </button>
+        </div>
+
+        {checking ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-400">
+            <RefreshCw className="size-8 animate-spin text-brand-400" />
+            <p className="mt-4 text-sm font-semibold">Running diagnostics checks…</p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {checkResults.map((result, idx) => (
+              <div
+                key={idx}
+                className={`flex gap-3 rounded-2xl border p-4 text-left leading-relaxed ${
+                  result.status === 'success'
+                    ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-100'
+                    : result.status === 'warning'
+                    ? 'border-amber-400/20 bg-amber-400/5 text-amber-100'
+                    : 'border-red-400/20 bg-red-400/5 text-red-100'
+                }`}
+              >
+                <span className="mt-0.5 shrink-0">
+                  {result.status === 'success' ? (
+                    <CheckCircle className="size-5 text-emerald-400" />
+                  ) : result.status === 'warning' ? (
+                    <Info className="size-5 text-amber-400" />
+                  ) : (
+                    <AlertTriangle className="size-5 text-red-400" />
+                  )}
+                </span>
+                <div className="flex-1">
+                  <h4 className="text-sm font-black">{result.title}</h4>
+                  <p className="mt-1 text-xs font-semibold opacity-85">{result.message}</p>
+                  {result.recommendation && (
+                    <div className="mt-2.5 rounded-xl bg-black/30 p-3 text-[11px] font-medium leading-relaxed opacity-95">
+                      <strong className="text-zinc-200">Recommended fix:</strong> {result.recommendation}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Screen Capture Compatibility Section */}
       <section className="mt-8 grid gap-6 lg:grid-cols-2" aria-label="Original and captured video comparison">
         <article className="rounded-3xl border border-white/8 bg-white/[0.025] p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -169,3 +337,4 @@ export function CaptureCompatibilityPage() {
     </main>
   )
 }
+
