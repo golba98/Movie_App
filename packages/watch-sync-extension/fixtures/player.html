@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Native video player fixture</title>
+    <style>
+      body { margin: 0; min-height: 100vh; background: #020617; color: #f8fafc; font-family: system-ui, sans-serif; }
+      main { padding: 18px; }
+      video.main { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+      video.preview { position: fixed; right: 8px; bottom: 8px; width: 120px; height: 68px; }
+      .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+      button { border: 0; border-radius: 8px; padding: 8px 10px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div id="video-host"></div>
+      <div class="controls">
+        <button id="replace">Replace main video</button>
+        <button id="preview">Toggle tiny preview</button>
+        <button id="buffer">Emit buffering signal</button>
+        <button id="autoplay">Autoplay rejection mode</button>
+      </div>
+    </main>
+    <script>
+      const host = document.querySelector('#video-host')
+      const makeMain = () => {
+        const video = document.createElement('video')
+        video.className = 'main'
+        video.controls = true
+        video.preload = 'metadata'
+        video.src = 'http://127.0.0.1:4300/test-media/capture-test.mp4'
+        return video
+      }
+      host.replaceChildren(makeMain())
+      document.querySelector('#replace').addEventListener('click', () => host.replaceChildren(makeMain()))
+      document.querySelector('#preview').addEventListener('click', () => {
+        const existing = document.querySelector('video.preview')
+        if (existing) return existing.remove()
+        const preview = document.createElement('video')
+        preview.className = 'preview'
+        preview.muted = true
+        preview.loop = true
+        preview.autoplay = true
+        preview.src = 'http://127.0.0.1:4300/test-media/capture-test.mp4#t=0,8'
+        document.body.append(preview)
+      })
+      document.querySelector('#buffer').addEventListener('click', () => {
+        const video = document.querySelector('video.main')
+        video.dispatchEvent(new Event('waiting'))
+        setTimeout(() => video.dispatchEvent(new Event('canplay')), 500)
+      })
+      document.querySelector('#autoplay').addEventListener('click', () => {
+        const video = document.querySelector('video.main')
+        video.pause()
+        video.dataset.autoplayRejectionFixture = 'enabled'
+      })
+    </script>
+  </body>
+</html>

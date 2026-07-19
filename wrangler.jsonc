@@ -18,8 +18,18 @@
       "migrations_dir": "migrations"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "WATCH_PARTY_ROOM", "class_name": "WatchPartyRoom" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["WatchPartyRoom"] }
+  ],
   "secrets": {
-    "required": ["ADMIN_PASSWORD", "TMDB_ACCESS_TOKEN"]
+    // WATCH_PARTY_ENABLED gates the in-development watch party API: "true" in
+    // .dev.vars locally, intentionally never set in production (missing ⇒ 404).
+    "required": ["ADMIN_PASSWORD", "TMDB_ACCESS_TOKEN", "WATCH_PARTY_SIGNING_SECRET", "WATCH_PARTY_ENABLED"]
   },
   "observability": {
     "enabled": true

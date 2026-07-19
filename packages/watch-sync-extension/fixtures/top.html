@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Watch Sync two-origin fixture</title>
+    <style>
+      body { margin: 0; min-height: 100vh; background: #09090b; color: #fafafa; font-family: system-ui, sans-serif; }
+      main { width: min(1100px, calc(100% - 32px)); margin: auto; padding: 24px 0; }
+      .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+      button { border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; }
+      iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px solid #3f3f46; border-radius: 18px; background: #000; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Watch Sync integration fixture</h1>
+      <p>Top page: 127.0.0.1:4300 · player frame: 127.0.0.1:4301</p>
+      <div class="controls">
+        <button id="navigate-frame">Navigate player iframe</button>
+        <button id="remove-frame">Remove player iframe</button>
+        <button id="restore-frame">Restore player iframe</button>
+      </div>
+      <div id="frame-host"><iframe id="player-frame" title="Player fixture" src="http://127.0.0.1:4301/"></iframe></div>
+    </main>
+    <script>
+      const host = document.querySelector('#frame-host')
+      let generation = 0
+      const createFrame = () => {
+        const frame = document.createElement('iframe')
+        frame.id = 'player-frame'
+        frame.title = 'Player fixture'
+        frame.src = `http://127.0.0.1:4301/?generation=${generation}`
+        host.replaceChildren(frame)
+      }
+      document.querySelector('#navigate-frame').addEventListener('click', () => { generation += 1; createFrame() })
+      document.querySelector('#remove-frame').addEventListener('click', () => host.replaceChildren())
+      document.querySelector('#restore-frame').addEventListener('click', createFrame)
+    </script>
+  </body>
+</html>

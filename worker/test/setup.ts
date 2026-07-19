@@ -6,6 +6,11 @@ beforeEach(async () => {
   const testEnv = env as Env & { TEST_MIGRATIONS: D1Migration[] }
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS)
   await testEnv.DB.batch([
+    testEnv.DB.prepare('DELETE FROM watch_room_join_attempts'),
+    testEnv.DB.prepare('DELETE FROM watch_room_audit_events'),
+    testEnv.DB.prepare('DELETE FROM watch_room_bans'),
+    testEnv.DB.prepare('DELETE FROM watch_room_invitations'),
+    testEnv.DB.prepare('DELETE FROM watch_rooms'),
     testEnv.DB.prepare('DELETE FROM media_sources'),
     testEnv.DB.prepare('DELETE FROM stream_resolution_cache'),
     testEnv.DB.prepare('DELETE FROM favourites'),

@@ -171,6 +171,18 @@ textarea {
   background: rgb(113 113 122 / 70%);
 }
 
+/* Rounded overlay panels scroll without a visible scrollbar: native scrollbars
+   (Firefox/GTK especially) are drawn square against the border box, so any
+   visible bar cuts across the panel's rounded corners. Wheel, trackpad,
+   keyboard, and touch scrolling all still work. */
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
 .line-clamp-2,
 .line-clamp-3 {
   display: -webkit-box;

@@ -14,6 +14,7 @@ Fedora Movies is a private, account-based movie and TV application built with Re
 - Movie and TV discovery, search, details, trailers, providers, cast, and episode browsing
 - A mobile-first dark Apple-inspired interface with safe-area support, bottom navigation on phones, touch-sized controls, and adaptive iPad/tablet layouts
 - A signed-in `/capture-test` page for separating application playback faults from browser, GPU, Wayland, PipeWire, and protected-content capture faults
+- Synchronized Watch Party rooms for administrator-approved direct MP4/WebM sources, with invitations, presence, permissions, and no built-in calling or WebRTC
 - Isolated Worker/D1 tests plus Chromium, Firefox, Android, iPhone-profile, iPad-profile, responsive, and accessibility browser tests
 
 The production player supports direct administrator-approved media URLs through a persistent HTML5 `<video>` element. Administrators may also configure optional dynamic providers that resolve an external embed only after a viewer explicitly presses **Watch**. Fedora Movies does not proxy the resulting media or attempt to bypass DRM, access controls, or copy protection.
@@ -44,11 +45,12 @@ npm start
 
 `npm start` launches the development server and opens Fedora Movies in the default browser. Use `npm run dev` when you want the server without opening a browser automatically.
 
-The Worker fails closed when its secrets are absent. For local development, create an ignored `.dev.vars` file containing `ADMIN_PASSWORD` and `TMDB_ACCESS_TOKEN`. No password or token value is committed to this repository.
+The Worker fails closed when its secrets are absent. For local development, create an ignored `.dev.vars` file containing `ADMIN_PASSWORD`, `TMDB_ACCESS_TOKEN`, and `WATCH_PARTY_SIGNING_SECRET`. No password or token value is committed to this repository.
 
 ```text
 ADMIN_PASSWORD=choose-a-long-unique-password
 TMDB_ACCESS_TOKEN=your-tmdb-read-access-token
+WATCH_PARTY_SIGNING_SECRET=generate-a-long-random-value
 ```
 
 Open the URL printed by Vite, then visit `/admin` to sign in and create the first viewer account. Viewer temporary passwords must be 12–128 characters and are never returned by the API or retained in the admin form.
@@ -119,6 +121,7 @@ Run both commands and enter each value only at Wrangler's secure prompt:
 ```bash
 npx wrangler secret put ADMIN_PASSWORD
 npx wrangler secret put TMDB_ACCESS_TOKEN
+npx wrangler secret put WATCH_PARTY_SIGNING_SECRET
 ```
 
 The administrator password is intentionally not set by this repository. `wrangler.jsonc` declares both secrets as required, so missing configuration is visible during local builds and deployment checks.
@@ -160,8 +163,11 @@ src/          React application
   types/      Shared API and media contracts
   utils/      Formatting and media helpers
 tests/        Playwright end-to-end, device, responsive, and accessibility tests
+packages/     Chromium watch-sync companion extension workspace
 worker/       Cloudflare Worker routes, authentication, admin, media catalog, favourites, and TMDB proxy
 ```
+
+The optional Chromium companion is documented in [`docs/watch-sync-extension.md`](docs/watch-sync-extension.md). Build it with `npm run extension:build`; its unpacked output is `packages/watch-sync-extension/dist/`.
 
 ## TMDB attribution
 

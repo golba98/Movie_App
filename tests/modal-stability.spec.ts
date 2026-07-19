@@ -85,7 +85,7 @@ async function startFrameSampler(page: Page) {
     let running = true
     const tick = () => {
       if (!running) return
-      const root = document.querySelector('div.fixed.inset-0.z-50') as HTMLElement | null
+      const root = document.querySelector('div.fixed.inset-0.z-\\[60\\]') as HTMLElement | null
       if (root) {
         const panel = root.querySelector(':scope > div.max-w-5xl') as HTMLElement | null
         const opacity = panel ? Number(getComputedStyle(panel).opacity) : 0
@@ -121,12 +121,12 @@ test('opening a card never paints an empty modal and keeps a stationary close bu
   // Skeleton must be present immediately, before the details resolve.
   const closeButton = page.getByRole('button', { name: 'Close details' })
   await expect(closeButton).toBeVisible()
-  await expect(page.locator('div.fixed.inset-0.z-50 .animate-pulse').first()).toBeVisible()
+  await expect(page.locator('div.fixed.inset-0.z-\\[60\\] .animate-pulse').first()).toBeVisible()
 
   // Measure only once the entrance transform has settled (rendered width equals
   // layout width ⇒ scale is 1), so we isolate any shift caused by data loading
   // rather than by the entrance scale animation.
-  const panel = page.locator('div.fixed.inset-0.z-50 > div.max-w-5xl')
+  const panel = page.locator('div.fixed.inset-0.z-\\[60\\] > div.max-w-5xl')
   const settled = () =>
     panel.evaluate((el) => Math.abs(el.getBoundingClientRect().width - (el as HTMLElement).offsetWidth) < 0.5)
   await expect.poll(settled).toBe(true)
@@ -166,7 +166,7 @@ test('switching to a different title clears to a skeleton without an empty frame
   // The previous title must be cleared to a loading skeleton (not held on screen),
   // proving the request state resets rather than retaining Dune's data...
   await expect(page.getByRole('article').getByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeHidden()
-  await expect(page.locator('div.fixed.inset-0.z-50 .animate-pulse').first()).toBeVisible()
+  await expect(page.locator('div.fixed.inset-0.z-\\[60\\] .animate-pulse').first()).toBeVisible()
   // ...and then the new title loads.
   await expect(page.getByRole('article').getByRole('heading', { level: 1, name: 'Arrival' })).toBeVisible()
 

@@ -26,6 +26,20 @@ import {
 import { proxyTmdb } from './tmdb'
 import { changePassword, viewerLogin, viewerLogout, viewerSession } from './viewer'
 import { hashPassword } from './auth'
+import {
+  createWatchParty,
+  joinWatchParty,
+  lookupWatchParty,
+  regenerateWatchPartyInvitation,
+  watchPartyExtensionDevConnect,
+  watchPartyExtensionSocket,
+  watchPartyExtensionToken,
+  watchPartyMedia,
+  watchPartyRoomInfo,
+  watchPartySocket,
+  watchPartyState,
+} from './watch-party'
+export { WatchPartyRoom } from './watch-party-room'
 
 let dbSeeded = false
 
@@ -72,9 +86,20 @@ function routeMethod(request: Request, handlers: Partial<Record<string, () => Pr
 }
 
 async function handleApi(request: Request, env: Env) {
-  assertSameOrigin(request)
   const url = new URL(request.url)
   const path = url.pathname
+
+  // Watch party is still under development: only reachable when the
+  // WATCH_PARTY_ENABLED var is set (local .dev.vars); production deploys
+  // leave it unset so every watch-party route 404s and the Durable Object
+  // is never instantiated.
+  if (path.startsWith('/api/watch-party') && env.WATCH_PARTY_ENABLED !== 'true') {
+    return Response.json(
+      { error: { code: 'NOT_FOUND', message: 'API route not found.' } },
+      { status: 404, headers: { 'Cache-Control': 'no-store' } },
+    )
+  }
+  if (path !== '/api/watch-party/extension/dev-connect') assertSameOrigin(request)
 
   if (env.TMDB_ACCESS_TOKEN !== 'unit-test-tmdb-token') {
     await ensureTesterAccount(env.DB)
@@ -163,6 +188,48 @@ async function handleApi(request: Request, env: Env) {
 
   if (path === '/api/media-sources/extract') {
     return routeMethod(request, { GET: () => extractStreamEndpoint(request, env) })
+  }
+
+  if (path === '/api/watch-party/rooms') {
+    return routeMethod(request, { POST: () => createWatchParty(request, env) })
+  }
+  if (path === '/api/watch-party/lookup') {
+    return routeMethod(request, { GET: () => lookupWatchParty(request, env) })
+  }
+  if (path === '/api/watch-party/extension/dev-connect') {
+    return routeMethod(request, { POST: () => watchPartyExtensionDevConnect(request, env) })
+  }
+  const watchPartyRoomMatch = path.match(/^\/api\/watch-party\/rooms\/([^/]+)$/)
+  if (watchPartyRoomMatch) {
+    return routeMethod(request, { GET: () => watchPartyRoomInfo(request, env, decodeURIComponent(watchPartyRoomMatch[1])) })
+  }
+  const watchPartyJoinMatch = path.match(/^\/api\/watch-party\/rooms\/([^/]+)\/join$/)
+  if (watchPartyJoinMatch) {
+    return routeMethod(request, { POST: () => joinWatchParty(request, env, decodeURIComponent(watchPartyJoinMatch[1])) })
+  }
+  const watchPartyStateMatch = path.match(/^\/api\/watch-party\/rooms\/([^/]+)\/state$/)
+  if (watchPartyStateMatch) {
+    return routeMethod(request, { GET: () => watchPartyState(request, env, decodeURIComponent(watchPartyStateMatch[1])) })
+  }
+  const watchPartyMediaMatch = path.match(/^\/api\/watch-party\/rooms\/([^/]+)\/media$/)
+  if (watchPartyMediaMatch) {
+    return routeMethod(request, { GET: () => watchPartyMedia(request, env, decodeURIComponent(watchPartyMediaMatch[1])) })
+  }
+  const watchPartySocketMatch = path.match(/^\/api\/watch-party\/rooms\/([^/]+)\/socket$/)
+  if (watchPartySocketMatch) {
+    return routeMethod(request, { GET: () => watchPartySocket(request, env, decodeURIComponent(watchPartySocketMatch[1])) })
+  }
+  const watchPartyExtensionTokenMatch = path.match(/^\/api\/watch-party\/rooms\/([^/]+)\/extension-token$/)
+  if (watchPartyExtensionTokenMatch) {
+    return routeMethod(request, { POST: () => watchPartyExtensionToken(request, env, decodeURIComponent(watchPartyExtensionTokenMatch[1])) })
+  }
+  const watchPartyExtensionSocketMatch = path.match(/^\/api\/watch-party\/rooms\/([^/]+)\/extension-socket$/)
+  if (watchPartyExtensionSocketMatch) {
+    return routeMethod(request, { GET: () => watchPartyExtensionSocket(request, env, decodeURIComponent(watchPartyExtensionSocketMatch[1])) })
+  }
+  const watchPartyInviteMatch = path.match(/^\/api\/watch-party\/rooms\/([^/]+)\/invitation$/)
+  if (watchPartyInviteMatch) {
+    return routeMethod(request, { POST: () => regenerateWatchPartyInvitation(request, env, decodeURIComponent(watchPartyInviteMatch[1])) })
   }
 
   if (path === '/api/favourites') {

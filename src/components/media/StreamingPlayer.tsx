@@ -10,9 +10,10 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiRequest } from '../../api/client'
 import { getTvSeasonDetails } from '../../api/tmdb'
+import { useTheaterFullscreen } from '../../hooks/useTheaterFullscreen'
 import { useVideoDiagnostics } from '../../hooks/useVideoDiagnostics'
 import type { MediaSource } from '../../types/media-source'
 import type { Episode, MediaType } from '../../types/tmdb'
@@ -35,11 +36,8 @@ function isEmbeddableUrl(candidate: string | null, wrapperUrl: string) {
   try {
     const extracted = new URL(candidate)
     const wrapper = new URL(wrapperUrl, window.location.origin)
-    const hostname = extracted.hostname.toLowerCase()
     return extracted.protocol === 'https:'
       && extracted.href !== wrapper.href
-      && !hostname.includes('flixbaba')
-      && !hostname.includes('soap2day')
   } catch {
     return false
   }
@@ -92,6 +90,7 @@ export function StreamingPlayer({
   const [videoMuted, setVideoMuted] = useState(false)
   const [videoVolume, setVideoVolume] = useState(1)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const playerShellRef = useRef<HTMLDivElement>(null)
   const exitButtonRef = useRef<HTMLButtonElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const iframeRevealTimerRef = useRef<number | null>(null)
@@ -124,6 +123,9 @@ export function StreamingPlayer({
       returnFocusRef.current = null
     }
   }, [theaterMode, onTheaterModeChange])
+
+  const exitTheater = useCallback(() => onTheaterModeChange(false), [onTheaterModeChange])
+  useTheaterFullscreen(theaterMode, playerShellRef, videoRef, exitTheater)
 
   const playableSources = useMemo(() => {
     if (mediaType === 'movie') {
@@ -170,6 +172,16 @@ export function StreamingPlayer({
     return playableSources[0]
   }, [playableSources, selectedSourceId, failedSourceIds])
   const activeSourceIsDynamic = isDynamicSource(activeSource)
+  const getSourceLabel = (source: MediaSource) => {
+    const cleanLabel = source.label.replace(' Stream (Dynamic)', '')
+    if (cleanLabel.toLowerCase().includes('flixbaba')) {
+      return 'Source 1'
+    }
+    if (cleanLabel.toLowerCase().includes('soap2day')) {
+      return 'Source 2'
+    }
+    return cleanLabel
+  }
   const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
 
   const availableSeasons = useMemo(() => {
@@ -349,7 +361,7 @@ export function StreamingPlayer({
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Video player</p>
           <h2 id="empty-player-heading" className="mt-1 text-lg font-black text-white">Authorised playback</h2>
         </div>
-        <div className="relative grid aspect-video place-items-center overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
+        <div className="relative grid place-items-center overflow-hidden rounded-2xl bg-black py-8 shadow-2xl ring-1 ring-white/10 sm:aspect-video sm:py-0">
           <div className="max-w-lg px-6 text-center">
             <span className="mx-auto grid size-14 place-items-center rounded-full border border-amber-300/20 bg-amber-300/10 text-amber-200">
               <Info aria-hidden="true" />
@@ -429,7 +441,7 @@ export function StreamingPlayer({
                 <button
                   type="button"
                   onClick={() => setInlinePlaybackRequested(false)}
-                  className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                  className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
                   aria-label="Stop player"
                   title="Stop player"
                 >
@@ -439,7 +451,7 @@ export function StreamingPlayer({
               <button
                 type="button"
                 onClick={() => onTheaterModeChange(true)}
-                className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
                 aria-label="Theater mode"
                 title="Theater mode"
               >
@@ -464,13 +476,13 @@ export function StreamingPlayer({
                       return next
                     })
                   }}
-                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 ${
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 pointer-coarse:min-h-11 ${
                     activeSource?.id === source.id
-                      ? 'bg-emerald-500/12 border border-emerald-400/30 text-emerald-300 shadow-md shadow-emerald-500/10'
+                      ? 'bg-brand-400 border border-brand-400 text-ink-950 shadow-md shadow-brand-400/10 active-bg-emerald-500'
                       : 'bg-white/5 border border-white/5 text-zinc-400 hover:bg-white/10 hover:border-white/10 hover:text-zinc-200'
                   }`}
                 >
-                  {source.label.replace(' Stream (Dynamic)', '')}
+                  {getSourceLabel(source)}
                 </button>
               ))}
             </div>
@@ -479,6 +491,7 @@ export function StreamingPlayer({
           {/* Promoted to full-viewport with CSS rather than reparented — moving the
               iframe/video in the DOM would remount it and restart playback. */}
           <div
+            ref={playerShellRef}
             className={
               theaterMode
                 ? 'fixed inset-0 z-50 flex items-center justify-center bg-black'
@@ -498,7 +511,7 @@ export function StreamingPlayer({
             )}
             {activeSourceIsDynamic ? (
               !dynamicPlaybackRequested ? (
-                <div className="grid aspect-video size-full place-items-center bg-black px-6 text-center">
+                <div className="grid size-full place-items-center bg-black px-6 py-8 text-center sm:aspect-video sm:py-0">
                   <div className="max-w-md">
                     <span className="mx-auto grid size-14 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300">
                       <Play size={20} fill="currentColor" aria-hidden="true" />
@@ -532,14 +545,14 @@ export function StreamingPlayer({
                       <div>
                         <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
                         <p className="mt-4 text-sm font-semibold text-zinc-300">
-                          Loading player ({activeSource.label.replace(' Stream (Dynamic)', '')})…
+                          Loading player ({getSourceLabel(activeSource)})…
                         </p>
                       </div>
                     </div>
                   )}
                 </div>
               ) : dynamicPlayerStatus === 'error' ? (
-                <div className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'aspect-video'}`}>
+                <div className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'py-8 sm:aspect-video sm:py-0'}`}>
                   <div role="alert" className="max-w-md">
                     <span className="mx-auto grid size-14 place-items-center rounded-full border border-red-400/20 bg-red-400/10 text-red-200">
                       <AlertCircle aria-hidden="true" />
@@ -573,11 +586,11 @@ export function StreamingPlayer({
                   </div>
                 </div>
               ) : (
-                <div role="status" className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'aspect-video'}`}>
+                <div role="status" className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'py-8 sm:aspect-video sm:py-0'}`}>
                   <div>
                     <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
                     <p className="mt-4 text-sm font-semibold text-zinc-300">
-                      Preparing player ({activeSource.label.replace(' Stream (Dynamic)', '')})…
+                      Preparing player ({getSourceLabel(activeSource)})…
                     </p>
                   </div>
                 </div>
@@ -631,7 +644,7 @@ export function StreamingPlayer({
                     <button
                       type="button"
                       onClick={toggleVideoPlayback}
-                      className="grid size-10 shrink-0 place-items-center rounded-full bg-white text-black transition hover:bg-zinc-200"
+                      className="grid size-10 shrink-0 place-items-center rounded-full bg-white text-black transition hover:bg-zinc-200 pointer-coarse:size-11"
                       aria-label={videoPlaying ? 'Pause video' : 'Play video'}
                     >
                       {videoPlaying ? <Pause size={17} fill="currentColor" aria-hidden="true" /> : <Play size={17} fill="currentColor" aria-hidden="true" />}
@@ -645,13 +658,13 @@ export function StreamingPlayer({
                       value={Math.min(videoCurrentTime, safeDuration || 0)}
                       onChange={(event) => seekVideo(Number(event.target.value))}
                       disabled={safeDuration === 0}
-                      className="min-w-20 flex-1 accent-white disabled:opacity-40"
+                      className="order-first basis-full accent-white disabled:opacity-40 sm:order-none sm:min-w-20 sm:flex-1 sm:basis-auto"
                       aria-label="Seek video"
                     />
                     <button
                       type="button"
                       onClick={() => setVideoMutedState(!videoMuted)}
-                      className="grid size-10 shrink-0 place-items-center rounded-full text-zinc-100 transition hover:bg-white/10"
+                      className="ml-auto grid size-10 shrink-0 place-items-center rounded-full text-zinc-100 transition hover:bg-white/10 pointer-coarse:size-11 sm:ml-0"
                       aria-label={videoMuted ? 'Unmute video' : 'Mute video'}
                     >
                       {videoMuted ? <VolumeX size={18} aria-hidden="true" /> : <Volume2 size={18} aria-hidden="true" />}
@@ -663,7 +676,7 @@ export function StreamingPlayer({
                       step="0.05"
                       value={videoMuted ? 0 : videoVolume}
                       onChange={(event) => setVideoVolumeState(Number(event.target.value))}
-                      className="w-20 accent-white sm:w-24"
+                      className="w-20 accent-white pointer-coarse:hidden sm:w-24"
                       aria-label="Video volume"
                     />
                   </div>

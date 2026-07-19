@@ -75,3 +75,20 @@ export async function timingSafeStringEqual(left: string, right: string) {
   ])
   return subtle.timingSafeEqual(leftHash, rightHash)
 }
+
+export async function signValue(value: string, secret: string) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(value))
+  return bytesToBase64Url(new Uint8Array(signature))
+}
+
+export async function verifySignedValue(value: string, signature: string, secret: string) {
+  const expected = await signValue(value, secret)
+  return timingSafeStringEqual(signature, expected)
+}

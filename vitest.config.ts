@@ -12,6 +12,8 @@ export default defineConfig({
         bindings: {
           ADMIN_PASSWORD: 'unit-test-admin-password',
           TMDB_ACCESS_TOKEN: 'unit-test-tmdb-token',
+          WATCH_PARTY_SIGNING_SECRET: 'unit-test-watch-party-signing-secret',
+          WATCH_PARTY_ENABLED: 'true',
           TEST_MIGRATIONS: migrations,
         },
       },

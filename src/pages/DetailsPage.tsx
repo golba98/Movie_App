@@ -1,10 +1,11 @@
-import { CalendarDays, Clock, Heart, Play, Star, UserRound, X } from 'lucide-react'
+import { CalendarDays, Clock, Heart, Play, Star, UserRound, Users, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import { getMediaSources } from '../api/media-sources'
 import { getMovieDetails, getTvDetails } from '../api/tmdb'
 import { CastList } from '../components/media/CastList'
 import { StreamingPlayer } from '../components/media/StreamingPlayer'
+import { CreateWatchPartyDialog } from '../components/watch-party/CreateWatchPartyDialog'
 
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 import { MediaRow } from '../components/media/MediaRow'
@@ -15,6 +16,7 @@ import { useFavourites } from '../hooks/useFavourites'
 import { useRequest } from '../hooks/useRequest'
 import type { MediaSource } from '../types/media-source'
 import type { MediaItem, MediaType, MovieDetails, TvDetails } from '../types/tmdb'
+import { watchPartyEnabled } from '../utils/featureFlags'
 import { backdropUrl } from '../utils/images'
 import {
   chooseTrailer,
@@ -42,6 +44,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const [mediaSources, setMediaSources] = useState<MediaSource[] | null>(null)
   const [sourceError, setSourceError] = useState(false)
   const [theaterMode, setTheaterMode] = useState(false)
+  const [watchPartyOpen, setWatchPartyOpen] = useState(false)
   const { isFavourite, toggleFavourite } = useFavourites()
 
   // Entrance / crossfade states
@@ -156,7 +159,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const watchProviders = data?.['watch/providers']?.results?.ZA
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4 sm:p-6 md:p-10">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-0 sm:p-6 md:p-10">
       {/* Backdrop overlay */}
       <div
         className={`absolute inset-0 bg-zinc-950/80 backdrop-blur-md transition-opacity duration-200 ease-out ${
@@ -172,7 +175,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
           this max-w-5xl panel. The transition is dropped too, otherwise `scale: 1`
           lingers for the duration while animating out to `none`. */}
       <div
-        className={`relative z-10 w-full max-w-5xl h-full max-h-[92vh] sm:max-h-[85vh] overflow-y-auto [scrollbar-gutter:stable] rounded-3xl border border-white/10 bg-zinc-950 shadow-2xl ease-out ${
+        className={`scrollbar-hidden relative z-10 w-full max-w-5xl h-full max-h-none sm:max-h-[85vh] overflow-y-auto rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/10 bg-zinc-950 shadow-2xl ease-out ${
           theaterMode
             ? 'opacity-100 transition-none'
             : `transition-all duration-200 ${
@@ -204,7 +207,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
         <div className="relative">
           {/* Loaded details content */}
           {isDataReady && data && item && (
-            <article className="min-w-0 pb-14 sm:pb-20">
+            <article className="min-w-0 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:pb-20">
                 <header className="relative isolate min-h-[260px] overflow-hidden sm:min-h-[390px] lg:min-h-[470px]">
                   {/* Gradient fill sits behind the backdrop as the reserved
                       fallback: it shows before the image decodes and stays if the
@@ -232,23 +235,23 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                       <PosterImage path={item.posterPath} title={item.title} />
                     </div>
 
-                    <div className="min-w-0 pt-0 text-center md:pt-14 md:text-left">
+                    <div className="min-w-0 pt-0 text-left md:pt-14">
                       <span className="inline-flex rounded-full bg-brand-500/15 px-3 py-1 text-xs font-black uppercase tracking-wider text-brand-400">
                         {mediaType === 'movie' ? 'Movie' : 'TV show'}
                       </span>
                       <h1 className="mt-3 text-3xl font-black leading-tight tracking-tight text-white sm:text-5xl">{item.title}</h1>
-                      <div className="mt-4 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm font-semibold text-zinc-300 md:justify-start">
+                      <div className="mt-4 flex flex-wrap justify-start gap-x-5 gap-y-2 text-sm font-semibold text-zinc-300">
                         <span className="inline-flex items-center gap-1.5"><Star size={16} fill="currentColor" className="text-amber-400" aria-hidden="true" />{formatRating(item.voteAverage)} TMDB</span>
                         <span className="inline-flex items-center gap-1.5"><CalendarDays size={16} aria-hidden="true" />{formatDate(item.date)}</span>
                         {movie && <span className="inline-flex items-center gap-1.5"><Clock size={16} aria-hidden="true" />{formatRuntime(movie.runtime)}</span>}
                         {tv && <span>{tv.number_of_seasons ? `${tv.number_of_seasons} season${tv.number_of_seasons === 1 ? '' : 's'}` : 'Seasons unavailable'}</span>}
                       </div>
 
-                      <div className="mt-5 flex flex-wrap justify-center gap-2 md:justify-start">
+                      <div className="mt-5 flex flex-wrap justify-start gap-2">
                         {(data.genres ?? []).map((genre) => <span key={genre.id} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-300">{genre.name}</span>)}
                       </div>
 
-                      <p className="mx-auto mt-6 max-w-3xl text-left leading-7 text-zinc-300 md:mx-0">{item.overview || 'An overview is not available for this title.'}</p>
+                      <p className="mt-6 max-w-3xl text-left leading-7 text-zinc-300">{item.overview || 'An overview is not available for this title.'}</p>
 
                       {movie && (
                         <p className="mt-4 inline-flex items-center gap-2 text-sm text-zinc-400">
@@ -257,7 +260,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                         </p>
                       )}
 
-                      <div className="mt-7 flex flex-wrap justify-center gap-3 md:justify-start">
+                      <div className="mt-7 flex flex-wrap justify-start gap-3">
                         {mediaSources === null ? (
                           <span role="status" className="inline-flex min-h-12 items-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-400">
                             Checking authorised playback…
@@ -272,6 +275,15 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                             Watch {mediaType === 'movie' ? 'Movie' : 'Show'}
                           </button>
                         ) : null}
+                        {watchPartyEnabled && mediaSources !== null && mediaSources.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setWatchPartyOpen(true)}
+                            className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 bg-white/7 px-5 font-black text-white transition hover:bg-white/12"
+                          >
+                            <Users size={18} aria-hidden="true" />Watch with friends
+                          </button>
+                        )}
                         {trailer && (
                           <button
                             type="button"
@@ -340,6 +352,17 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                   <MediaRow title={`Similar ${mediaType === 'movie' ? 'movies' : 'shows'}`} items={similar} loading={false} error={null} />
                 </div>
                 <TrailerModal trailer={trailerOpen ? trailer : null} onClose={() => setTrailerOpen(false)} />
+                {watchPartyEnabled && (
+                  <CreateWatchPartyDialog
+                    open={watchPartyOpen}
+                    onClose={() => setWatchPartyOpen(false)}
+                    sources={mediaSources ?? []}
+                    mediaType={mediaType}
+                    title={item.title}
+                    posterPath={item.posterPath}
+                    backdropPath={item.backdropPath}
+                  />
+                )}
               </article>
           )}
 
@@ -360,15 +383,15 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                   <div className="relative grid min-w-0 gap-7 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-10">
                     <div className="mx-auto aspect-[2/3] w-40 overflow-hidden rounded-2xl bg-zinc-900/80 shadow-2xl shadow-black/50 ring-1 ring-white/5 sm:w-52 md:mx-0 md:w-full" />
 
-                    <div className="min-w-0 pt-0 text-center md:pt-14 md:text-left space-y-4">
+                    <div className="min-w-0 pt-0 text-left md:pt-14 space-y-4">
                       <div className="inline-flex h-6 w-20 rounded-full bg-brand-500/10" />
-                      <div className="mx-auto mt-3 h-10 w-3/4 rounded-xl bg-zinc-900/80 md:mx-0 md:w-1/2" />
-                      <div className="mt-4 flex flex-wrap justify-center gap-x-5 gap-y-2 md:justify-start">
+                      <div className="mt-3 h-10 w-3/4 rounded-xl bg-zinc-900/80 md:w-1/2" />
+                      <div className="mt-4 flex flex-wrap justify-start gap-x-5 gap-y-2">
                         <div className="h-4 w-20 rounded bg-zinc-900/80" />
                         <div className="h-4 w-24 rounded bg-zinc-900/80" />
                         <div className="h-4 w-16 rounded bg-zinc-900/80" />
                       </div>
-                      <div className="mt-5 flex flex-wrap justify-center gap-2 md:justify-start">
+                      <div className="mt-5 flex flex-wrap justify-start gap-2">
                         <div className="h-6 w-16 rounded-full bg-zinc-900/60" />
                         <div className="h-6 w-20 rounded-full bg-zinc-900/60" />
                         <div className="h-6 w-14 rounded-full bg-zinc-900/60" />
@@ -379,9 +402,9 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                         <div className="h-4 w-4/5 rounded bg-zinc-900/70" />
                       </div>
                       {mediaType === 'movie' && (
-                        <div className="mt-4 h-4 w-48 rounded bg-zinc-900/60 mx-auto md:mx-0" />
+                        <div className="mt-4 h-4 w-48 rounded bg-zinc-900/60" />
                       )}
-                      <div className="mt-7 flex flex-wrap justify-center gap-3 md:justify-start">
+                      <div className="mt-7 flex flex-wrap justify-start gap-3">
                         <div className="h-12 w-32 rounded-xl bg-zinc-900/80" />
                         <div className="h-12 w-28 rounded-xl bg-zinc-900/80" />
                         <div className="h-12 w-36 rounded-xl bg-zinc-900/80" />
