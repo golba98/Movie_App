@@ -495,7 +495,7 @@ export function StreamingPlayer({
             className={
               theaterMode
                 ? 'fixed inset-0 z-50 flex items-center justify-center bg-black'
-                : 'relative overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10'
+                : 'relative w-full aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10'
             }
           >
             {theaterMode && (
@@ -511,7 +511,7 @@ export function StreamingPlayer({
             )}
             {activeSourceIsDynamic ? (
               !dynamicPlaybackRequested ? (
-                <div className="grid size-full place-items-center bg-black px-6 py-8 text-center sm:aspect-video sm:py-0">
+                <div className="grid size-full place-items-center bg-black px-6 text-center">
                   <div className="max-w-md">
                     <span className="mx-auto grid size-14 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300">
                       <Play size={20} fill="currentColor" aria-hidden="true" />
@@ -530,7 +530,7 @@ export function StreamingPlayer({
                   </div>
                 </div>
               ) : dynamicPlayerStatus === 'ready' && extractedUrl ? (
-                <div className={`relative size-full bg-black ${theaterMode ? '' : 'aspect-video'}`}>
+                <div className="relative size-full bg-black">
                   <iframe
                     src={extractedUrl}
                     className={`block size-full border-0 bg-black object-contain transition-opacity duration-200 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
@@ -552,7 +552,7 @@ export function StreamingPlayer({
                   )}
                 </div>
               ) : dynamicPlayerStatus === 'error' ? (
-                <div className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'py-8 sm:aspect-video sm:py-0'}`}>
+                <div className="grid size-full place-items-center bg-black px-6 text-center">
                   <div role="alert" className="max-w-md">
                     <span className="mx-auto grid size-14 place-items-center rounded-full border border-red-400/20 bg-red-400/10 text-red-200">
                       <AlertCircle aria-hidden="true" />
@@ -586,7 +586,7 @@ export function StreamingPlayer({
                   </div>
                 </div>
               ) : (
-                <div role="status" className={`grid size-full place-items-center bg-black px-6 text-center ${theaterMode ? '' : 'py-8 sm:aspect-video sm:py-0'}`}>
+                <div role="status" className="grid size-full place-items-center bg-black px-6 text-center">
                   <div>
                     <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
                     <p className="mt-4 text-sm font-semibold text-zinc-300">
@@ -602,7 +602,7 @@ export function StreamingPlayer({
                   src={activeSource.sourceUrl}
                   playsInline
                   preload="metadata"
-                  className={`block size-full bg-black object-contain ${theaterMode ? '' : 'aspect-video'}`}
+                  className="block size-full bg-black object-contain"
                   aria-label={`Video player for ${title}`}
                   onDoubleClick={(event) => event.preventDefault()}
                   onLoadedMetadata={(event) => {
