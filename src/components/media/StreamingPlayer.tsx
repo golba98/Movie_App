@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   ChevronDown,
+  ExternalLink,
   Info,
   Maximize2,
   Minimize2,
@@ -448,6 +449,18 @@ export function StreamingPlayer({
               >
                 <Info size={17} aria-hidden="true" />
               </button>
+              {extractedUrl && (
+                <a
+                  href={extractedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
+                  aria-label="Open stream in new tab"
+                  title="Open stream in new tab"
+                >
+                  <ExternalLink size={17} aria-hidden="true" />
+                </a>
+              )}
               {activeSourceIsDynamic && inlinePlaybackRequested && !theaterMode && (
                 <button
                   type="button"
@@ -712,10 +725,23 @@ export function StreamingPlayer({
               <button
                 type="button"
                 onClick={() => setDiagnosticsOpen(true)}
-                className="font-bold text-zinc-300 hover:text-brand-400 underline decoration-dotted transition"
+                className="font-bold text-zinc-300 hover:text-brand-400 underline decoration-dotted cursor-pointer transition"
               >
                 Run Player Diagnostics
               </button>
+              {extractedUrl && (
+                <>
+                  {' '}or{' '}
+                  <a
+                    href={extractedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-zinc-300 hover:text-brand-400 underline decoration-dotted transition"
+                  >
+                    Open stream in new tab
+                  </a>
+                </>
+              )}
               .
             </p>
           )}
