@@ -28,7 +28,8 @@
   ],
   "secrets": {
     // WATCH_PARTY_ENABLED gates the in-development watch party API: "true" in
-    // .dev.vars locally, intentionally never set in production (missing ⇒ 404).
+    // .dev.vars locally, "false" in production (deploys fail unless every
+    // required secret exists, so it must be set even while the feature is off).
     "required": ["ADMIN_PASSWORD", "TMDB_ACCESS_TOKEN", "WATCH_PARTY_SIGNING_SECRET", "WATCH_PARTY_ENABLED"]
   },
   "observability": {
