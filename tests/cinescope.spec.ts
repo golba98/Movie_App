@@ -801,7 +801,7 @@ test('dynamic players start inline, can expand to theater mode, and always leave
   const iframe = page.locator('#streaming-player iframe')
   await expect(iframe).toHaveAttribute('src', embedUrl)
   await expect(iframe).toHaveAttribute('allowfullscreen', '')
-  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation')
+  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-popups-to-escape-sandbox')
   await expect(iframe).toHaveAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen')
   await expect(page.getByRole('status')).toContainText('Loading player')
   expect(wrapperRequests).toBe(0)
