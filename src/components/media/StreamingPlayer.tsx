@@ -18,6 +18,7 @@ import { useVideoDiagnostics } from '../../hooks/useVideoDiagnostics'
 import type { MediaSource } from '../../types/media-source'
 import type { Episode, MediaType } from '../../types/tmdb'
 import { imageUrl } from '../../utils/images'
+import { PlayerDiagnosticsModal } from './PlayerDiagnosticsModal'
 
 const EXTRACTION_TIMEOUT_MS = 15_000
 const IFRAME_LOAD_TIMEOUT_MS = 12_000
@@ -88,6 +89,7 @@ export function StreamingPlayer({
   const [videoDuration, setVideoDuration] = useState(0)
   const [videoPlaying, setVideoPlaying] = useState(false)
   const [videoMuted, setVideoMuted] = useState(false)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [videoVolume, setVideoVolume] = useState(1)
   const videoRef = useRef<HTMLVideoElement>(null)
   const playerShellRef = useRef<HTMLDivElement>(null)
@@ -437,6 +439,15 @@ export function StreamingPlayer({
               </h2>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDiagnosticsOpen(true)}
+                className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
+                aria-label="Player diagnostics"
+                title="Player diagnostics"
+              >
+                <Info size={17} aria-hidden="true" />
+              </button>
               {activeSourceIsDynamic && inlinePlaybackRequested && !theaterMode && (
                 <button
                   type="button"
@@ -694,6 +705,20 @@ export function StreamingPlayer({
               {currentMediaError}
             </p>
           )}
+
+          {activeSourceIsDynamic && (
+            <p className="mt-3 text-xs text-zinc-500 text-left px-1">
+              Third-party streaming source active. If you see a black screen or unavailable message,{' '}
+              <button
+                type="button"
+                onClick={() => setDiagnosticsOpen(true)}
+                className="font-bold text-zinc-300 hover:text-brand-400 underline decoration-dotted transition"
+              >
+                Run Player Diagnostics
+              </button>
+              .
+            </p>
+          )}
         </div>
 
         {mediaType === 'tv' && !theaterMode && (
@@ -764,6 +789,11 @@ export function StreamingPlayer({
           </aside>
         )}
       </div>
+      <PlayerDiagnosticsModal
+        isOpen={diagnosticsOpen}
+        onClose={() => setDiagnosticsOpen(false)}
+        resolvedUrl={extractedUrl || activeSource?.sourceUrl || null}
+      />
     </section>
   )
 }
