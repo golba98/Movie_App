@@ -138,6 +138,7 @@ function SynchronizedPlayer({ state, playbackUrl, playbackKind, canControl, send
               className="block size-full border-0 bg-black object-contain"
               allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
               allowFullScreen
+              referrerPolicy="origin"
               sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
             />
           </div>
