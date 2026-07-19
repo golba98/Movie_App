@@ -132,7 +132,7 @@ export function PlayerDiagnosticsModal({ isOpen, onClose, resolvedUrl }: PlayerD
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-sm sm:p-6 md:p-10">
-      <div className="relative w-full max-w-2xl rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl sm:p-8">
+      <div className="relative w-full max-w-2xl rounded-3xl border border-white/8 bg-zinc-950 p-6 shadow-2xl sm:p-8">
         <button
           type="button"
           onClick={onClose}
@@ -143,7 +143,7 @@ export function PlayerDiagnosticsModal({ isOpen, onClose, resolvedUrl }: PlayerD
         </button>
 
         <header className="mb-6">
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-400">Troubleshooter</p>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Troubleshooter</p>
           <h2 className="mt-2 text-2xl font-black text-white sm:text-3xl">Player Diagnostics</h2>
           <p className="mt-1 text-sm text-zinc-400">
             Diagnose compatibility issues with local development and third-party resolvers.
@@ -160,13 +160,7 @@ export function PlayerDiagnosticsModal({ isOpen, onClose, resolvedUrl }: PlayerD
             results.map((result, idx) => (
               <div
                 key={idx}
-                className={`flex gap-3 rounded-2xl border p-4 text-left leading-relaxed ${
-                  result.status === 'success'
-                    ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-100'
-                    : result.status === 'warning'
-                    ? 'border-amber-400/20 bg-amber-400/5 text-amber-100'
-                    : 'border-red-400/20 bg-red-400/5 text-red-100'
-                }`}
+                className="flex gap-3.5 rounded-2xl border border-white/5 bg-white/[0.012] p-4 text-zinc-300 transition hover:border-white/10"
               >
                 <span className="mt-0.5 shrink-0">
                   {result.status === 'success' ? (
@@ -178,10 +172,10 @@ export function PlayerDiagnosticsModal({ isOpen, onClose, resolvedUrl }: PlayerD
                   )}
                 </span>
                 <div className="flex-1">
-                  <h4 className="text-sm font-black">{result.title}</h4>
-                  <p className="mt-1 text-xs font-semibold opacity-85">{result.message}</p>
+                  <h4 className="text-sm font-black text-zinc-100">{result.title}</h4>
+                  <p className="mt-1 text-xs font-semibold text-zinc-400">{result.message}</p>
                   {result.recommendation && (
-                    <div className="mt-2.5 rounded-xl bg-black/30 p-3 text-[11px] font-medium leading-relaxed opacity-95">
+                    <div className="mt-3.5 rounded-xl border border-white/5 bg-zinc-950/60 p-3 text-[11px] font-medium leading-relaxed text-zinc-400">
                       <strong className="text-zinc-200">Recommended fix:</strong> {result.recommendation}
                     </div>
                   )}
@@ -196,7 +190,7 @@ export function PlayerDiagnosticsModal({ isOpen, onClose, resolvedUrl }: PlayerD
             type="button"
             onClick={() => void runDiagnostics()}
             disabled={loading}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-black text-white transition hover:bg-white/10 hover:text-white"
+            className="secondary-button cursor-pointer text-xs"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             Re-run checks
@@ -204,7 +198,7 @@ export function PlayerDiagnosticsModal({ isOpen, onClose, resolvedUrl }: PlayerD
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex min-h-11 items-center rounded-xl bg-white px-5 text-xs font-black text-black transition hover:bg-zinc-200"
+            className="primary-button cursor-pointer text-xs"
           >
             Close
           </button>

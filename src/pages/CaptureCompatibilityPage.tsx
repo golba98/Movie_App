@@ -193,7 +193,7 @@ export function CaptureCompatibilityPage() {
       </Link>
 
       <header className="mt-5 max-w-4xl">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-400">Diagnostics</p>
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Diagnostics</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">System Diagnostics</h1>
         <p className="mt-4 max-w-3xl leading-7 text-zinc-400">
           Diagnose player network, referrer policy, tracking protections, and screen capture compatibility.
@@ -201,17 +201,17 @@ export function CaptureCompatibilityPage() {
       </header>
 
       {/* Network & Referrer Diagnostics Section */}
-      <section className="mt-10 rounded-3xl border border-white/8 bg-white/[0.025] p-5 sm:p-7" aria-labelledby="network-diagnostics-heading">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <section className="mt-10 rounded-3xl border border-white/8 bg-white/[0.015] p-5 sm:p-7" aria-labelledby="network-diagnostics-heading">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-brand-400">Policy & Connectivity Checks</p>
-            <h2 id="network-diagnostics-heading" className="mt-1 text-2xl font-black">Player Network & Referrer Diagnostics</h2>
+            <p className="text-xs font-black uppercase tracking-wider text-zinc-500">Policy & Connectivity Checks</p>
+            <h2 id="network-diagnostics-heading" className="mt-1 text-2xl font-black text-white">Player Network & Referrer Diagnostics</h2>
           </div>
           <button
             type="button"
             onClick={() => void runNetworkChecks()}
             disabled={checking}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-black text-white hover:bg-white/10 hover:text-white active:scale-95 disabled:opacity-50 transition duration-200"
+            className="secondary-button cursor-pointer text-xs"
           >
             <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
             Re-run checks
@@ -228,13 +228,7 @@ export function CaptureCompatibilityPage() {
             {checkResults.map((result, idx) => (
               <div
                 key={idx}
-                className={`flex gap-3 rounded-2xl border p-4 text-left leading-relaxed ${
-                  result.status === 'success'
-                    ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-100'
-                    : result.status === 'warning'
-                    ? 'border-amber-400/20 bg-amber-400/5 text-amber-100'
-                    : 'border-red-400/20 bg-red-400/5 text-red-100'
-                }`}
+                className="flex gap-3.5 rounded-2xl border border-white/5 bg-white/[0.012] p-4 text-zinc-300 transition hover:border-white/10"
               >
                 <span className="mt-0.5 shrink-0">
                   {result.status === 'success' ? (
@@ -246,10 +240,10 @@ export function CaptureCompatibilityPage() {
                   )}
                 </span>
                 <div className="flex-1">
-                  <h4 className="text-sm font-black">{result.title}</h4>
-                  <p className="mt-1 text-xs font-semibold opacity-85">{result.message}</p>
+                  <h4 className="text-sm font-black text-zinc-100">{result.title}</h4>
+                  <p className="mt-1 text-xs font-semibold text-zinc-400">{result.message}</p>
                   {result.recommendation && (
-                    <div className="mt-2.5 rounded-xl bg-black/30 p-3 text-[11px] font-medium leading-relaxed opacity-95">
+                    <div className="mt-3.5 rounded-xl border border-white/5 bg-zinc-950/60 p-3 text-[11px] font-medium leading-relaxed text-zinc-400">
                       <strong className="text-zinc-200">Recommended fix:</strong> {result.recommendation}
                     </div>
                   )}
