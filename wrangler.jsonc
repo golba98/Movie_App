@@ -26,12 +26,12 @@
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["WatchPartyRoom"] }
   ],
-  "secrets": {
-    // WATCH_PARTY_ENABLED gates the in-development watch party API: "true" in
-    // .dev.vars locally, "false" in production (deploys fail unless every
-    // required secret exists, so it must be set even while the feature is off).
-    "required": ["ADMIN_PASSWORD", "TMDB_ACCESS_TOKEN", "WATCH_PARTY_SIGNING_SECRET", "WATCH_PARTY_ENABLED"]
-  },
+  // No "secrets" block on purpose: declaring secrets.required makes deploys
+  // hard-fail unless every listed secret exists on the worker, and it replaces
+  // .dev.vars inference locally. Worker env comes from .dev.vars in dev/preview
+  // (ADMIN_PASSWORD, TMDB_ACCESS_TOKEN, WATCH_PARTY_SIGNING_SECRET,
+  // WATCH_PARTY_ENABLED) and from worker secrets in production, where
+  // WATCH_PARTY_ENABLED is intentionally unset ⇒ watch party API stays 404.
   "observability": {
     "enabled": true
   }
