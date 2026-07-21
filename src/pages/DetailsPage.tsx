@@ -14,6 +14,7 @@ import { TrailerModal } from '../components/media/TrailerModal'
 import { hasWatchProviders, WatchProviders } from '../components/media/WatchProviders'
 import { useFavourites } from '../hooks/useFavourites'
 import { useRequest } from '../hooks/useRequest'
+import { useWatchedHistory } from '../hooks/useWatchedHistory'
 import type { MediaSource } from '../types/media-source'
 import type { MediaItem, MediaType, MovieDetails, TvDetails } from '../types/tmdb'
 import { watchPartyEnabled } from '../utils/featureFlags'
@@ -46,6 +47,8 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const [theaterMode, setTheaterMode] = useState(false)
   const [watchPartyOpen, setWatchPartyOpen] = useState(false)
   const { isFavourite, toggleFavourite } = useFavourites()
+  const { getLastWatchedEpisode } = useWatchedHistory()
+  const lastWatched = useMemo(() => (mediaType === 'tv' && validId ? getLastWatchedEpisode(id) : null), [mediaType, validId, id, getLastWatchedEpisode])
 
   // Entrance / crossfade states
   const [isMounted, setIsMounted] = useState(false)
@@ -272,7 +275,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                             className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-brand-400 px-5 font-black text-zinc-950 transition hover:bg-brand-500"
                           >
                             <Play size={18} fill="currentColor" aria-hidden="true" />
-                            Watch {mediaType === 'movie' ? 'Movie' : 'Show'}
+                            {mediaType === 'movie' ? 'Watch Movie' : lastWatched ? `Resume S${lastWatched.seasonNumber} E${lastWatched.episodeNumber}` : 'Watch Show'}
                           </button>
                         ) : null}
                         {watchPartyEnabled && mediaSources !== null && mediaSources.length > 0 && (

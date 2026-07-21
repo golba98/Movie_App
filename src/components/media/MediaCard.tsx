@@ -1,14 +1,18 @@
 import { Heart, Star } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
 import { useFavourites } from '../../hooks/useFavourites'
+import { useWatchedHistory } from '../../hooks/useWatchedHistory'
 import type { MediaItem } from '../../types/tmdb'
 import { formatRating, mediaPath } from '../../utils/media'
 import { PosterImage } from './PosterImage'
 
 export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolean }) {
   const { isFavourite, toggleFavourite } = useFavourites()
+  const { getLastWatchedEpisode, isMovieWatched } = useWatchedHistory()
   const favourite = isFavourite(item)
   const location = useLocation()
+  const lastWatched = item.mediaType === 'tv' ? getLastWatchedEpisode(item.id) : null
+  const movieWatched = item.mediaType === 'movie' ? isMovieWatched(item.id) : false
 
   return (
     <article className={`group min-w-0 ${row ? 'w-[148px] shrink-0 sm:w-[168px] lg:w-[184px]' : ''}`}>
@@ -39,6 +43,16 @@ export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolea
         <span className="absolute bottom-2 left-2 z-0 rounded-md bg-black/65 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-100 backdrop-blur-sm">
           {item.mediaType === 'movie' ? 'Movie' : 'TV'}
         </span>
+        {item.mediaType === 'tv' && lastWatched && (
+          <span className="absolute bottom-2 right-2 z-0 rounded-md bg-brand-400 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-950 backdrop-blur-sm shadow-md">
+            S{lastWatched.seasonNumber} E{lastWatched.episodeNumber}
+          </span>
+        )}
+        {item.mediaType === 'movie' && movieWatched && (
+          <span className="absolute bottom-2 right-2 z-0 rounded-md bg-emerald-500 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-950 backdrop-blur-sm shadow-md">
+            Watched
+          </span>
+        )}
       </div>
       <div className="mt-3 min-w-0">
         <Link
