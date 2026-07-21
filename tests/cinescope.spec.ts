@@ -902,3 +902,58 @@ test('player automatically falls back to the next available source if the first 
   ])
 })
 
+test('watched history persists and shows progress for movies and TV episodes', async ({ page }) => {
+  // 1. Visit tv details page
+  await page.goto('/tv/10')
+  await expect(page.getByRole('button', { name: 'Watch Show' })).toBeVisible()
+
+  // 2. Open the player
+  await page.getByRole('button', { name: 'Watch Show' }).click()
+  await page.getByRole('button', { name: 'Exit theater mode' }).click()
+
+  const player = page.locator('#streaming-player')
+  await expect(player).toBeVisible()
+
+  // 3. Verify watched indicator is "0 / 2 watched"
+  await expect(player.getByText('0 / 2 watched')).toBeVisible()
+
+  // 4. Mark "Dulcinea" (Episode 1) as watched via checkmark
+  const episodeCard = player.locator('div').filter({ has: page.getByRole('button', { name: 'Dulcinea' }) }).last()
+  await expect(episodeCard).toBeVisible()
+  
+  const checkButton = episodeCard.getByRole('button', { name: 'Mark as watched' })
+  await expect(checkButton).toBeVisible()
+  await checkButton.click()
+
+  // 5. Verify watched indicator is "1 / 2 watched"
+  await expect(player.getByText('1 / 2 watched')).toBeVisible()
+  await expect(episodeCard.getByRole('button', { name: 'Mark as unwatched' })).toBeVisible()
+
+  // 6. Navigate to homepage to verify show card displays watched status
+  await page.goto('/')
+  const expanseCard = page.locator('article', { hasText: 'The Expanse' }).first()
+  await expect(expanseCard).toBeVisible()
+  await expect(expanseCard.getByText('S1 E1')).toBeVisible()
+
+  // 7. Go back to TV details page and verify the Watch button is updated to "Resume S1 E1"
+  await page.goto('/tv/10')
+  await expect(page.getByRole('button', { name: 'Resume S1 E1' })).toBeVisible()
+
+  // 8. Test Movie watched history
+  await page.goto('/movie/1')
+  const watchMovieBtn = page.getByRole('button', { name: 'Watch Movie' })
+  await expect(watchMovieBtn).toBeVisible()
+  await watchMovieBtn.click()
+  await page.getByRole('button', { name: 'Exit theater mode' }).click()
+
+  // Start playback to trigger the movie as watched
+  await player.getByRole('button', { name: 'Play video' }).click()
+
+  // Go to homepage and verify the Dune card has "Watched" badge
+  await page.goto('/')
+  const duneCard = page.locator('article', { hasText: 'Dune: Part Two' }).first()
+  await expect(duneCard).toBeVisible()
+  await expect(duneCard.getByText('Watched')).toBeVisible()
+})
+
+

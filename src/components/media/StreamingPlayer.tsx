@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Check,
   ChevronDown,
   Info,
   Maximize2,
@@ -15,6 +16,7 @@ import { apiRequest } from '../../api/client'
 import { getTvSeasonDetails } from '../../api/tmdb'
 import { useTheaterFullscreen } from '../../hooks/useTheaterFullscreen'
 import { useVideoDiagnostics } from '../../hooks/useVideoDiagnostics'
+import { useWatchedHistory } from '../../hooks/useWatchedHistory'
 import type { MediaSource } from '../../types/media-source'
 import type { Episode, MediaType } from '../../types/tmdb'
 import { imageUrl } from '../../utils/images'
@@ -70,9 +72,55 @@ export function StreamingPlayer({
   theaterMode,
   onTheaterModeChange,
 }: StreamingPlayerProps) {
-  const initialSource = sources[0]
-  const [activeSeason, setActiveSeason] = useState(initialSource?.seasonNumber ?? 1)
-  const [activeEpisode, setActiveEpisode] = useState(initialSource?.episodeNumber ?? 1)
+  const { isEpisodeWatched, toggleEpisodeWatched, setEpisodeWatched, getLastWatchedEpisode, isMovieWatched, setMovieWatched } = useWatchedHistory()
+
+  // Calculate the next episode to watch based on history
+  const { initialSeason, initialEpisode } = useMemo(() => {
+    if (mediaType !== 'tv') return { initialSeason: 1, initialEpisode: 1 }
+    const lastWatched = getLastWatchedEpisode(id)
+    if (!lastWatched) {
+      const firstSource = sources[0]
+      return {
+        initialSeason: firstSource?.seasonNumber ?? 1,
+        initialEpisode: firstSource?.episodeNumber ?? 1,
+      }
+    }
+    
+    // Check if we have a direct next source in the static sources
+    const tvSources = sources
+      .filter((s) => s.seasonNumber != null && s.episodeNumber != null)
+      .sort((a, b) => a.seasonNumber! - b.seasonNumber! || a.episodeNumber! - b.episodeNumber!)
+      
+    const lastIndex = tvSources.findIndex(
+      (s) => s.seasonNumber === lastWatched.seasonNumber && s.episodeNumber === lastWatched.episodeNumber
+    )
+    
+    if (lastIndex !== -1 && lastIndex < tvSources.length - 1) {
+      const nextSource = tvSources[lastIndex + 1]
+      return {
+        initialSeason: nextSource.seasonNumber!,
+        initialEpisode: nextSource.episodeNumber!,
+      }
+    }
+    
+    // Default to next episode in the current season (will auto-correct if out of bounds when episodes load)
+    return {
+      initialSeason: lastWatched.seasonNumber,
+      initialEpisode: lastWatched.episodeNumber + 1,
+    }
+  }, [id, mediaType, sources, getLastWatchedEpisode])
+
+  const [activeSeason, setActiveSeason] = useState(initialSeason)
+  const [activeEpisode, setActiveEpisode] = useState(initialEpisode)
+
+  const availableSeasons = useMemo(() => {
+    const hasDynamic = sources.some((source) => source.isDynamic)
+    if (hasDynamic && numberOfSeasons) {
+      return Array.from({ length: numberOfSeasons }, (_, i) => i + 1)
+    }
+    return [...new Set(sources.flatMap((source) => source.seasonNumber ?? []))].sort((a, b) => a - b)
+  }, [sources, numberOfSeasons])
+
   const [seasonDropdownOpen, setSeasonDropdownOpen] = useState(false)
   const [episodes, setEpisodes] = useState<Episode[]>([])
   const [loadingEpisodes, setLoadingEpisodes] = useState(mediaType === 'tv')
@@ -103,6 +151,66 @@ export function StreamingPlayer({
     setFailedSourceIds(new Set())
     setInlinePlaybackRequested(false)
   }, [id, activeSeason, activeEpisode])
+
+  // Sync state if id changes
+  useEffect(() => {
+    if (mediaType === 'tv') {
+      const lastWatched = getLastWatchedEpisode(id)
+      if (!lastWatched) {
+        const firstSource = sources[0]
+        setActiveSeason(firstSource?.seasonNumber ?? 1)
+        setActiveEpisode(firstSource?.episodeNumber ?? 1)
+      } else {
+        const tvSources = sources
+          .filter((s) => s.seasonNumber != null && s.episodeNumber != null)
+          .sort((a, b) => a.seasonNumber! - b.seasonNumber! || a.episodeNumber! - b.episodeNumber!)
+          
+        const lastIndex = tvSources.findIndex(
+          (s) => s.seasonNumber === lastWatched.seasonNumber && s.episodeNumber === lastWatched.episodeNumber
+        )
+        
+        if (lastIndex !== -1 && lastIndex < tvSources.length - 1) {
+          const nextSource = tvSources[lastIndex + 1]
+          setActiveSeason(nextSource.seasonNumber!)
+          setActiveEpisode(nextSource.episodeNumber!)
+        } else {
+          setActiveSeason(lastWatched.seasonNumber)
+          setActiveEpisode(lastWatched.episodeNumber + 1)
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
+  // Auto-correct episode selection if next estimated episode is out of bounds
+  useEffect(() => {
+    if (mediaType !== 'tv' || loadingEpisodes || episodes.length === 0) return
+    
+    if (activeEpisode > episodes.length) {
+      const currentSeasonIndex = availableSeasons.indexOf(activeSeason)
+      if (currentSeasonIndex !== -1 && currentSeasonIndex < availableSeasons.length - 1) {
+        const nextSeason = availableSeasons[currentSeasonIndex + 1]
+        setActiveSeason(nextSeason)
+        setActiveEpisode(1)
+      } else {
+        setActiveEpisode(episodes.length)
+      }
+    }
+  }, [episodes, loadingEpisodes, activeSeason, activeEpisode, availableSeasons, mediaType])
+
+  const handleStartPlayback = useCallback(() => {
+    if (mediaType === 'tv') {
+      if (!isEpisodeWatched(id, activeSeason, activeEpisode)) {
+        setEpisodeWatched(id, activeSeason, activeEpisode, true)
+      }
+    } else {
+      if (!isMovieWatched(id)) {
+        setMovieWatched(id, true)
+      }
+    }
+  }, [id, activeSeason, activeEpisode, mediaType, isEpisodeWatched, isMovieWatched, setEpisodeWatched, setMovieWatched])
+
+
 
   useEffect(() => {
     if (!theaterMode) return
@@ -184,13 +292,7 @@ export function StreamingPlayer({
   }
   const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
 
-  const availableSeasons = useMemo(() => {
-    const hasDynamic = sources.some((source) => source.isDynamic)
-    if (hasDynamic && numberOfSeasons) {
-      return Array.from({ length: numberOfSeasons }, (_, i) => i + 1)
-    }
-    return [...new Set(sources.flatMap((source) => source.seasonNumber ?? []))].sort((a, b) => a - b)
-  }, [sources, numberOfSeasons])
+
 
   useVideoDiagnostics(
     videoRef,
@@ -384,6 +486,7 @@ export function StreamingPlayer({
     const video = videoRef.current
     if (!video) return
     if (video.paused) {
+      handleStartPlayback()
       void video.play().catch(() => {
         setMediaError({
           sourceId: activeSource.id,
@@ -423,6 +526,7 @@ export function StreamingPlayer({
     iframeRevealTimerRef.current = window.setTimeout(() => {
       setIframeLoaded(true)
       iframeRevealTimerRef.current = null
+      handleStartPlayback()
     }, IFRAME_REVEAL_DELAY_MS)
   }
 
@@ -450,7 +554,12 @@ export function StreamingPlayer({
               )}
               <button
                 type="button"
-                onClick={() => onTheaterModeChange(true)}
+                onClick={() => {
+                  onTheaterModeChange(true)
+                  if (activeSourceIsDynamic) {
+                    handleStartPlayback()
+                  }
+                }}
                 className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
                 aria-label="Theater mode"
                 title="Theater mode"
@@ -522,7 +631,10 @@ export function StreamingPlayer({
                     </p>
                     <button
                       type="button"
-                      onClick={() => setInlinePlaybackRequested(true)}
+                      onClick={() => {
+                        setInlinePlaybackRequested(true)
+                        handleStartPlayback()
+                      }}
                       className="mt-5 min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
                     >
                       Play {mediaType === 'movie' ? 'movie' : 'episode'}
@@ -615,9 +727,33 @@ export function StreamingPlayer({
                     setVideoMuted(video.muted)
                   }}
                   onDurationChange={(event) => setVideoDuration(event.currentTarget.duration)}
-                  onTimeUpdate={(event) => setVideoCurrentTime(event.currentTarget.currentTime)}
-                  onPlay={() => setVideoPlaying(true)}
+                  onTimeUpdate={(event) => {
+                    const video = event.currentTarget
+                    setVideoCurrentTime(video.currentTime)
+                    if (video.duration > 0 && video.currentTime > video.duration * 0.9) {
+                      if (mediaType === 'tv') {
+                        if (!isEpisodeWatched(id, activeSeason, activeEpisode)) {
+                          setEpisodeWatched(id, activeSeason, activeEpisode, true)
+                        }
+                      } else if (mediaType === 'movie') {
+                        if (!isMovieWatched(id)) {
+                          setMovieWatched(id, true)
+                        }
+                      }
+                    }
+                  }}
+                  onPlay={() => {
+                    setVideoPlaying(true)
+                    handleStartPlayback()
+                  }}
                   onPause={() => setVideoPlaying(false)}
+                  onEnded={() => {
+                    if (mediaType === 'tv') {
+                      setEpisodeWatched(id, activeSeason, activeEpisode, true)
+                    } else if (mediaType === 'movie') {
+                      setMovieWatched(id, true)
+                    }
+                  }}
                   onVolumeChange={(event) => {
                     setVideoMuted(event.currentTarget.muted)
                     setVideoVolume(event.currentTarget.volume)
@@ -703,7 +839,26 @@ export function StreamingPlayer({
                 <h3 id="episodes-heading" className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-white">
                   <Play size={12} className="fill-current" aria-hidden="true" />Authorised episodes
                 </h3>
-                <p className="mt-1 text-[10px] text-zinc-500">{numberOfSeasons ?? availableSeasons.length} catalog season(s)</p>
+                <div className="mt-1 flex flex-col gap-1">
+                  <p className="text-[10px] text-zinc-500">{numberOfSeasons ?? availableSeasons.length} catalog season(s)</p>
+                  <p className="text-[10px] text-brand-400 font-bold">
+                    {catalogEpisodes.filter(({ source }) => isEpisodeWatched(id, activeSeason, source.episodeNumber!)).length} / {catalogEpisodes.length} watched
+                  </p>
+                  {catalogEpisodes.length > 0 && (
+                    <div className="h-1 w-24 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className="h-full bg-brand-400 transition-all duration-300"
+                        style={{
+                          width: `${
+                            (catalogEpisodes.filter(({ source }) => isEpisodeWatched(id, activeSeason, source.episodeNumber!)).length /
+                              catalogEpisodes.length) *
+                            100
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="relative">
                 <button
@@ -741,23 +896,56 @@ export function StreamingPlayer({
               {catalogEpisodes.map(({ source, episode }) => {
                 const selected = source.id === activeSource.id
                 const stillUrl = imageUrl(episode?.still_path, 'w185')
+                const watched = isEpisodeWatched(id, activeSeason, source.episodeNumber!)
                 return (
-                  <button
+                  <div
                     key={source.id}
-                    type="button"
-                    onClick={() => setActiveEpisode(source.episodeNumber!)}
-                    aria-pressed={selected}
-                    className={`flex w-full items-start gap-3 rounded-2xl border p-2 text-left transition ${selected ? 'border-white/20 bg-white/10 text-white' : 'border-white/5 bg-white/[0.02] text-zinc-400 hover:bg-white/5 hover:text-white'}`}
+                    className={`flex w-full items-start gap-1 rounded-2xl border p-2 text-left transition ${
+                      selected
+                        ? 'border-white/20 bg-white/10 text-white'
+                        : 'border-white/5 bg-white/[0.02] text-zinc-400 hover:bg-white/5 hover:text-white'
+                    }`}
                   >
-                    <span className="relative aspect-video w-24 shrink-0 overflow-hidden rounded-xl bg-zinc-900">
-                      {stillUrl ? <img src={stillUrl} alt="" className="size-full object-cover" loading="lazy" /> : <span className="grid size-full place-items-center"><Play size={14} aria-hidden="true" /></span>}
-                      <span className="absolute bottom-1 right-1 rounded bg-black/85 px-1.5 py-0.5 text-[8px] font-black text-zinc-200">EP {source.episodeNumber}</span>
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="line-clamp-1 block text-xs font-black">{episode?.name || source.label}</span>
-                      <span className="mt-1 line-clamp-2 block text-[9px] leading-relaxed text-zinc-500">{episode?.overview || 'Authorised episode available.'}</span>
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveEpisode(source.episodeNumber!)}
+                      aria-pressed={selected}
+                      className="flex flex-1 items-start gap-3 min-w-0 text-left outline-none"
+                    >
+                      <span className="relative aspect-video w-24 shrink-0 overflow-hidden rounded-xl bg-zinc-900">
+                        {stillUrl ? (
+                          <img src={stillUrl} alt="" className="size-full object-cover" loading="lazy" />
+                        ) : (
+                          <span className="grid size-full place-items-center">
+                            <Play size={14} aria-hidden="true" />
+                          </span>
+                        )}
+                        <span className="absolute bottom-1 right-1 rounded bg-black/85 px-1.5 py-0.5 text-[8px] font-black text-zinc-200">
+                          EP {source.episodeNumber}
+                        </span>
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="line-clamp-1 block text-xs font-black">
+                          {episode?.name || source.label}
+                        </span>
+                        <span className="mt-1 line-clamp-2 block text-[9px] leading-relaxed text-zinc-500">
+                          {episode?.overview || 'Authorised episode available.'}
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleEpisodeWatched(id, activeSeason, source.episodeNumber!)}
+                      className={`shrink-0 rounded-full p-2.5 transition active:scale-95 ${
+                        watched
+                          ? 'text-brand-400 hover:bg-brand-500/10'
+                          : 'text-zinc-600 hover:text-zinc-400 hover:bg-white/5'
+                      }`}
+                      title={watched ? 'Mark as unwatched' : 'Mark as watched'}
+                    >
+                      <Check size={14} className={watched ? 'stroke-[3px]' : 'stroke-[2px]'} />
+                    </button>
+                  </div>
                 )
               })}
             </div>

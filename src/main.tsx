@@ -5,6 +5,7 @@ import App from './App'
 import { AppErrorBoundary } from './components/layout/AppErrorBoundary'
 import { AuthProvider } from './hooks/useAuth'
 import { FavouritesProvider } from './hooks/useFavourites'
+import { WatchedHistoryProvider } from './hooks/useWatchedHistory'
 import './index.css'
 
 createRoot(document.getElementById('root')!).render(
@@ -12,9 +13,11 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <AuthProvider>
         <FavouritesProvider>
-          <AppErrorBoundary>
-            <App />
-          </AppErrorBoundary>
+          <WatchedHistoryProvider>
+            <AppErrorBoundary>
+              <App />
+            </AppErrorBoundary>
+          </WatchedHistoryProvider>
         </FavouritesProvider>
       </AuthProvider>
     </BrowserRouter>
