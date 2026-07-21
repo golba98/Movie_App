@@ -20,7 +20,7 @@ export function AppShell() {
     <div className="flex min-h-dvh min-w-0 flex-col overflow-x-hidden bg-[#070709]">
       <Header />
       <LegacyImportBanner />
-      <main className="min-w-0 flex-1 pb-24 md:pb-0">
+      <main className="min-w-0 flex-1 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-0">
         <Outlet />
       </main>
       <Footer />
