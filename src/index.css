@@ -21,7 +21,6 @@
 html {
   min-width: 320px;
   background: #070709;
-  scroll-behavior: smooth;
 }
 
 body {
@@ -29,9 +28,18 @@ body {
   min-height: 100dvh;
   margin: 0;
   overflow-x: hidden;
-  background:
-    radial-gradient(circle at 50% -20%, rgb(63 63 70 / 28%), transparent 42rem),
-    #070709;
+  background: #070709;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% -20%, rgb(63 63 70 / 28%), transparent 42rem);
+  z-index: 0;
+  transform: translateZ(0);
 }
 
 button,
@@ -160,6 +168,8 @@ textarea {
 .scrollbar-subtle {
   scrollbar-color: rgb(113 113 122 / 70%) transparent;
   scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .scrollbar-subtle::-webkit-scrollbar {
@@ -169,6 +179,33 @@ textarea {
 .scrollbar-subtle::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgb(113 113 122 / 70%);
+}
+
+.media-row-container {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 340px;
+}
+
+/* Lenis smooth scrolling rules */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
 }
 
 /* Rounded overlay panels scroll without a visible scrollbar: native scrollbars

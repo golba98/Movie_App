@@ -135,7 +135,7 @@ export function CreateWatchPartyDialog({
           <div className="p-5 sm:p-7"><p role="alert" className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">Watch rooms need an administrator-configured source.</p></div>
         ) : (
           <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
-            <div className="scrollbar-subtle min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-6 sm:px-7">
+            <div data-lenis-prevent className="scrollbar-subtle min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-6 sm:px-7">
               <label className="block text-sm font-semibold text-zinc-200">Room name<input className="form-input mt-2" value={roomName} onChange={(event) => setRoomName(event.target.value)} maxLength={80} required /></label>
               <label className="block text-sm font-semibold text-zinc-200">Video to synchronize<select className="form-input mt-2" value={sourceId} onChange={(event) => setSourceId(event.target.value)}>{sources.map((source) => <option key={source.id} value={source.id}>{getSourceLabel(source)}{mediaType === 'tv' ? ` · S${source.seasonNumber} E${source.episodeNumber}` : ''}</option>)}</select></label>
               <div className="grid gap-4 sm:grid-cols-2">
