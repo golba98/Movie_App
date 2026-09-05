@@ -178,6 +178,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
           this max-w-5xl panel. The transition is dropped too, otherwise `scale: 1`
           lingers for the duration while animating out to `none`. */}
       <div
+        data-lenis-prevent
         className={`scrollbar-hidden relative z-10 w-full max-w-5xl h-full max-h-none sm:max-h-[85vh] overflow-y-auto rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/10 bg-zinc-950 shadow-2xl ease-out ${
           theaterMode
             ? 'opacity-100 transition-none'

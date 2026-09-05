@@ -13,6 +13,7 @@ export function CastList({ cast }: { cast: CastMember[] }) {
   return (
     <div
       ref={scrollRef}
+      data-lenis-prevent
       className="scrollbar-subtle -mx-4 flex snap-x scroll-px-4 gap-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:scroll-px-6 sm:px-6 lg:-mx-8 lg:scroll-px-8 lg:px-8"
     >
       {cast.map((person) => {

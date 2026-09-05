@@ -30,26 +30,26 @@ export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolea
         <button
           type="button"
           onClick={() => toggleFavourite(item)}
-          className={`absolute right-2 top-2 z-20 grid size-11 place-items-center rounded-full border shadow-lg backdrop-blur-md transition ${
+          className={`absolute right-2 top-2 z-20 grid size-11 place-items-center rounded-full border shadow-lg transition ${
             favourite
               ? 'border-brand-400/50 bg-brand-600 text-white'
-              : 'border-white/15 bg-black/60 text-white hover:bg-black/80'
+              : 'border-white/15 bg-black/80 text-white hover:bg-black/90'
           }`}
           aria-label={favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`}
           aria-pressed={favourite}
         >
           <Heart size={18} fill={favourite ? 'currentColor' : 'none'} aria-hidden="true" />
         </button>
-        <span className="absolute bottom-2 left-2 z-0 rounded-md bg-black/65 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-100 backdrop-blur-sm">
+        <span className="absolute bottom-2 left-2 z-0 rounded-md border border-white/10 bg-black/80 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-100">
           {item.mediaType === 'movie' ? 'Movie' : 'TV'}
         </span>
         {item.mediaType === 'tv' && lastWatched && (
-          <span className="absolute bottom-2 right-2 z-0 rounded-md bg-brand-400 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-950 backdrop-blur-sm shadow-md">
+          <span className="absolute bottom-2 right-2 z-0 rounded-md border border-white/10 bg-brand-400 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-950 shadow-md">
             S{lastWatched.seasonNumber} E{lastWatched.episodeNumber}
           </span>
         )}
         {item.mediaType === 'movie' && movieWatched && (
-          <span className="absolute bottom-2 right-2 z-0 rounded-md bg-emerald-500 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-950 backdrop-blur-sm shadow-md">
+          <span className="absolute bottom-2 right-2 z-0 rounded-md border border-emerald-400/20 bg-emerald-500 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-950 shadow-md">
             Watched
           </span>
         )}
