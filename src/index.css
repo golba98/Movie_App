@@ -131,7 +131,8 @@ textarea {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   display: inline-flex;
   min-height: 48px;
   align-items: center;
@@ -162,8 +163,19 @@ textarea {
   background: rgb(255 255 255 / 10%);
 }
 
+.danger-button {
+  border: 1px solid rgb(248 113 113 / 30%);
+  background: rgb(248 113 113 / 10%);
+  color: #fca5a5;
+}
+
+.danger-button:hover {
+  background: rgb(248 113 113 / 18%);
+}
+
 .primary-button:disabled,
-.secondary-button:disabled {
+.secondary-button:disabled,
+.danger-button:disabled {
   cursor: wait;
   opacity: 0.55;
 }

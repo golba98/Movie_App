@@ -221,6 +221,24 @@ export async function revokeAccountSessions(request: Request, env: Env, accountI
   return json({ revoked: result.meta.changes })
 }
 
+export async function deleteAccount(request: Request, env: Env, accountId: string) {
+  await requireAdmin(request, env.DB)
+  const account = await env.DB
+    .prepare('SELECT id, username FROM accounts WHERE id = ?')
+    .bind(accountId)
+    .first<{ id: string; username: string }>()
+  if (!account) throw new ApiError(404, 'ACCOUNT_NOT_FOUND', 'Account not found.')
+  // Sessions are removed explicitly so the viewer is signed out even if foreign
+  // keys were ever disabled; favourites and watch rooms cascade with the account.
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM sessions WHERE account_id = ?').bind(accountId),
+    env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(accountId),
+  ])
+  // The account row is gone, so the audit entry keeps its identity in metadata.
+  await auditAdminEvent(request, env, 'account.delete', null, { accountId, username: account.username })
+  return json({ deleted: true })
+}
+
 export async function listAudit(request: Request, env: Env) {
   await requireAdmin(request, env.DB)
   const rows = await env.DB
@@ -240,13 +258,17 @@ export async function listAudit(request: Request, env: Env) {
       created_at: number
     }>()
   return json({
-    events: rows.results.map((row) => ({
-      id: row.id,
-      action: row.action,
-      targetAccountId: row.target_account_id,
-      targetUsername: row.target_username,
-      metadata: JSON.parse(row.metadata) as unknown,
-      createdAt: row.created_at,
-    })),
+    events: rows.results.map((row) => {
+      const metadata = JSON.parse(row.metadata) as Record<string, unknown>
+      return {
+        id: row.id,
+        action: row.action,
+        targetAccountId: row.target_account_id,
+        // Deleted accounts no longer join, so fall back to the name recorded at the time.
+        targetUsername: row.target_username ?? (typeof metadata.username === 'string' ? metadata.username : null),
+        metadata,
+        createdAt: row.created_at,
+      }
+    }),
   })
 }

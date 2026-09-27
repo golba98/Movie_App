@@ -7,6 +7,7 @@ import {
   LogOut,
   RefreshCw,
   Search,
+  Trash2,
   UserPlus,
   Users,
 } from 'lucide-react'
@@ -88,9 +89,10 @@ interface AccountCardProps {
   onSave: (account: ViewerAccount, changes: { displayName: string; active: boolean; expiresAt: number | null }) => Promise<void>
   onReset: (account: ViewerAccount) => void
   onRevoke: (account: ViewerAccount) => Promise<void>
+  onDelete: (account: ViewerAccount) => void
 }
 
-function AccountCard({ account, busy, onSave, onReset, onRevoke }: AccountCardProps) {
+function AccountCard({ account, busy, onSave, onReset, onRevoke, onDelete }: AccountCardProps) {
   const [displayName, setDisplayName] = useState(account.displayName)
   const [active, setActive] = useState(account.active)
   const [expiresAt, setExpiresAt] = useState(dateInputValue(account.expiresAt))
@@ -137,6 +139,7 @@ function AccountCard({ account, busy, onSave, onReset, onRevoke }: AccountCardPr
         <button type="button" disabled={busy} onClick={() => void onSave(account, { displayName, active, expiresAt: expiryValue(expiresAt) })} className="secondary-button justify-center sm:px-4">Save</button>
         <button type="button" disabled={busy} onClick={() => onReset(account)} className="secondary-button justify-center sm:px-4"><KeyRound size={16} aria-hidden="true" />Reset password</button>
         <button type="button" disabled={busy} onClick={() => void onRevoke(account)} className="secondary-button col-span-2 justify-center text-amber-200 sm:px-4"><RefreshCw size={16} aria-hidden="true" />Revoke sessions</button>
+        <button type="button" disabled={busy} onClick={() => onDelete(account)} aria-label={`Delete account ${account.username}`} className="danger-button col-span-2 justify-center sm:ml-auto sm:px-4"><Trash2 size={16} aria-hidden="true" />Delete account</button>
       </div>
     </article>
   )
@@ -154,6 +157,8 @@ export function AdminPage() {
   const [loadingData, setLoadingData] = useState(false)
   const [resetAccount, setResetAccount] = useState<ViewerAccount | null>(null)
   const [resetPassword, setResetPassword] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<ViewerAccount | null>(null)
+  const [deleteConfirmation, setDeleteConfirmation] = useState('')
   const [newAccount, setNewAccount] = useState({
     username: '',
     displayName: '',
@@ -187,6 +192,12 @@ export function AdminPage() {
       })
       .catch(() => setAuthenticated(false))
   }, [loadData])
+
+  useEffect(() => {
+    if (!notice) return
+    const timeout = window.setTimeout(() => setNotice(null), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [notice])
 
   const signIn = async (event: FormEvent) => {
     event.preventDefault()
@@ -300,6 +311,29 @@ export function AdminPage() {
     }
   }
 
+  const closeDelete = () => {
+    setDeleteTarget(null)
+    setDeleteConfirmation('')
+  }
+
+  const deleteAccount = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!deleteTarget || deleteConfirmation !== deleteTarget.username) return
+    const target = deleteTarget
+    setBusyId(target.id)
+    setError(null)
+    try {
+      await apiRequest(`/api/admin/accounts/${encodeURIComponent(target.id)}`, { method: 'DELETE' })
+      setNotice(`Deleted ${target.username}. Their sessions, favourites and watch parties were removed.`)
+      closeDelete()
+      await loadData(search)
+    } catch (caught) {
+      setError(messageFor(caught))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   if (authenticated === null) {
     return <main className="grid min-h-dvh place-items-center bg-[#070709]"><p role="status" className="text-zinc-400">Checking administrator session…</p></main>
   }
@@ -354,8 +388,6 @@ export function AdminPage() {
           <div className="flex items-center gap-2 rounded-full bg-white/6 px-4 py-2 text-sm text-zinc-300"><Users size={17} aria-hidden="true" />{accounts.length} shown</div>
         </div>
 
-        {(error || notice) && <div className="mt-6" aria-live="polite">{error ? <p role="alert" className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-200">{error}</p> : <p className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">{notice}</p>}</div>}
-
         <AdminMediaSourceCatalog />
 
         <AdminSearchProvidersCatalog />
@@ -379,7 +411,7 @@ export function AdminPage() {
               <input type="search" aria-label="Search viewer accounts" placeholder="Search accounts" value={search} onChange={(event) => setSearch(event.target.value)} className="form-input form-input-with-leading-icon" />
             </form>
           </div>
-          {loadingData ? <p role="status" className="mt-6 text-zinc-400">Loading accounts…</p> : accounts.length ? <div className="mt-5 grid gap-4 lg:grid-cols-2">{accounts.map((account) => <AccountCard key={account.id} account={account} busy={busyId === account.id} onSave={saveAccount} onReset={setResetAccount} onRevoke={revokeSessions} />)}</div> : <p className="glass-panel mt-5 rounded-3xl p-8 text-center text-zinc-400">No accounts match this search.</p>}
+          {loadingData && !accounts.length ? <p role="status" className="mt-6 text-zinc-400">Loading accounts…</p> : accounts.length ? <div className="mt-5 grid gap-4 lg:grid-cols-2">{accounts.map((account) => <AccountCard key={account.id} account={account} busy={busyId === account.id} onSave={saveAccount} onReset={setResetAccount} onRevoke={revokeSessions} onDelete={setDeleteTarget} />)}</div> : <p className="glass-panel mt-5 rounded-3xl p-8 text-center text-zinc-400">No accounts match this search.</p>}
         </section>
 
         <section aria-labelledby="audit-heading" className="mt-12">
@@ -390,15 +422,37 @@ export function AdminPage() {
         </section>
       </main>
 
+      {/* Fixed so showing or clearing a message never shifts the page layout. */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 pb-safe" aria-live="polite">
+        {(error || notice) && (error ? <p role="alert" className="pointer-events-auto max-w-xl rounded-2xl border border-red-400/20 bg-[#1a0d0e]/95 px-4 py-3 text-sm text-red-200 shadow-2xl backdrop-blur-xl">{error}</p> : <p className="pointer-events-auto max-w-xl rounded-2xl border border-emerald-400/20 bg-[#0c1a14]/95 px-4 py-3 text-sm text-emerald-200 shadow-2xl backdrop-blur-xl">{notice}</p>)}
+      </div>
+
       {resetAccount && (
-        <div className="fixed inset-0 z-50 grid place-items-end bg-black/75 p-3 backdrop-blur-sm sm:place-items-center" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setResetAccount(null) }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="reset-heading" className="glass-panel w-full max-w-md rounded-[2rem] p-6 sm:p-8">
+        <div className="fixed inset-0 z-50 grid place-items-end bg-black/75 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-sm sm:place-items-center" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setResetAccount(null) }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="reset-heading" className="glass-panel max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-[2rem] p-6 sm:p-8 short:p-5">
             <span className="grid size-12 place-items-center rounded-2xl bg-amber-300 text-zinc-950"><KeyRound aria-hidden="true" /></span>
             <h2 id="reset-heading" className="mt-5 text-2xl font-semibold">Reset {resetAccount.username}</h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">This revokes every active session. The viewer must change the new temporary password at their next sign-in.</p>
             <form onSubmit={reset} className="mt-6 space-y-4">
               <PasswordInput id="reset-account-temporary-password" label="New temporary password" autoFocus value={resetPassword} onChange={setResetPassword} />
               <div className="grid grid-cols-2 gap-3"><button type="button" onClick={() => { setResetAccount(null); setResetPassword('') }} className="secondary-button justify-center">Cancel</button><button type="submit" disabled={busyId === resetAccount.id} className="primary-button justify-center">Reset</button></div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 grid place-items-end bg-black/75 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-sm sm:place-items-center" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDelete() }} onKeyDown={(event) => { if (event.key === 'Escape') closeDelete() }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="delete-heading" aria-describedby="delete-description" className="glass-panel max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-[2rem] p-6 sm:p-8 short:p-5">
+            <span className="grid size-12 place-items-center rounded-2xl bg-red-500 text-white short:hidden"><Trash2 aria-hidden="true" /></span>
+            <h2 id="delete-heading" className="mt-5 text-2xl font-semibold short:mt-0">Delete {deleteTarget.username}?</h2>
+            <p id="delete-description" className="mt-2 text-sm leading-6 text-zinc-400">This permanently deletes the account, signs the viewer out everywhere, and removes their favourites and watch parties. This cannot be undone. To keep the data, disable the account instead.</p>
+            <form onSubmit={deleteAccount} className="mt-6 space-y-4">
+              <label htmlFor="delete-account-confirmation" className="block text-sm text-zinc-300">
+                Type <strong className="font-semibold text-white">{deleteTarget.username}</strong> to confirm
+                <input id="delete-account-confirmation" autoFocus autoComplete="off" autoCapitalize="none" spellCheck={false} value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} className="form-input mt-2" />
+              </label>
+              <div className="grid gap-3 min-[360px]:grid-cols-2"><button type="button" onClick={closeDelete} className="secondary-button justify-center">Cancel</button><button type="submit" disabled={busyId === deleteTarget.id || deleteConfirmation !== deleteTarget.username} className="danger-button justify-center whitespace-nowrap">{busyId === deleteTarget.id ? 'Deleting…' : 'Delete account'}</button></div>
             </form>
           </section>
         </div>
