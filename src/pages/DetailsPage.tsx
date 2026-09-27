@@ -1,6 +1,6 @@
-import { CalendarDays, Clock, Heart, Play, Star, UserRound, Users, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams, useNavigate } from 'react-router'
+import { CalendarDays, Check, Clock, Heart, Play, Star, UserRound, Users, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import { getMediaSources } from '../api/media-sources'
 import { getMovieDetails, getTvDetails } from '../api/tmdb'
 import { CastList } from '../components/media/CastList'
@@ -21,17 +21,29 @@ import { watchPartyEnabled } from '../utils/featureFlags'
 import { backdropUrl } from '../utils/images'
 import {
   chooseTrailer,
+  detailsToMediaItem,
   formatDate,
   formatRating,
   formatRuntime,
   normalizeMediaList,
+  resolveStartEpisode,
 } from '../utils/media'
+
+function formatResumeTime(seconds: number) {
+  const total = Math.floor(seconds)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const secs = String(total % 60).padStart(2, '0')
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${secs}` : `${minutes}:${secs}`
+}
 
 export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const { id: idParam } = useParams()
   const id = Number(idParam)
   const validId = Number.isInteger(id) && id > 0
   const navigate = useNavigate()
+  const location = useLocation()
+  const autoplayRequested = Boolean((location.state as { autoplay?: boolean } | null)?.autoplay)
 
   const loader = useCallback(
     (signal: AbortSignal): Promise<MovieDetails | TvDetails> => {
@@ -47,8 +59,12 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const [theaterMode, setTheaterMode] = useState(false)
   const [watchPartyOpen, setWatchPartyOpen] = useState(false)
   const { isFavourite, toggleFavourite } = useFavourites()
-  const { getLastWatchedEpisode } = useWatchedHistory()
-  const lastWatched = useMemo(() => (mediaType === 'tv' && validId ? getLastWatchedEpisode(id) : null), [mediaType, validId, id, getLastWatchedEpisode])
+  const { getResumeTarget, getTitleProgress, getProgress, isEpisodeWatched, isMovieWatched, toggleMovieWatched, backfillTitle } = useWatchedHistory()
+  const resumeTarget = mediaType === 'tv' && validId ? getResumeTarget(id) : null
+  const resumeTargetWatched = resumeTarget ? isEpisodeWatched(id, resumeTarget.seasonNumber, resumeTarget.episodeNumber) : false
+  const movieWatched = mediaType === 'movie' && validId && isMovieWatched(id)
+  const movieResume = mediaType === 'movie' && validId && !movieWatched ? getTitleProgress('movie', id) : null
+  const movieResumePosition = movieResume ? getProgress('movie', id)?.position ?? null : null
 
   // Entrance / crossfade states
   const [isMounted, setIsMounted] = useState(false)
@@ -133,23 +149,23 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   }, [id, mediaType, validId])
 
   const data = request.data
-  const item = useMemo<MediaItem | null>(() => {
-    if (!data) return null
-    const isMovie = mediaType === 'movie'
-    const title = isMovie ? (data as MovieDetails).title : (data as TvDetails).name
-    const date = isMovie ? (data as MovieDetails).release_date : (data as TvDetails).first_air_date
-    return {
-      id: data.id,
-      mediaType,
-      title,
-      overview: data.overview?.trim() ?? '',
-      posterPath: data.poster_path ?? null,
-      backdropPath: data.backdrop_path ?? null,
-      voteAverage: data.vote_average ?? 0,
-      date: date ?? null,
-      year: date?.slice(0, 4) || null,
-    }
-  }, [data, mediaType])
+  const item = useMemo<MediaItem | null>(
+    () => (data ? detailsToMediaItem(data, mediaType) : null),
+    [data, mediaType],
+  )
+
+  // Titles migrated from older history have no artwork snapshot yet.
+  useEffect(() => {
+    if (item) backfillTitle(item)
+  }, [item, backfillTitle])
+
+  // Opening a title from Continue Watching starts playback straight away.
+  const autoplayedIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!autoplayRequested || !item || !mediaSources?.length || autoplayedIdRef.current === id) return
+    autoplayedIdRef.current = id
+    setTheaterMode(true)
+  }, [autoplayRequested, item, mediaSources, id])
 
   const movie = mediaType === 'movie' ? (data as MovieDetails) : null
   const tv = mediaType === 'tv' ? (data as TvDetails) : null
@@ -160,6 +176,10 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const backdrop = item ? backdropUrl(item.backdropPath) : null
   const favourite = item ? isFavourite(item) : false
   const watchProviders = data?.['watch/providers']?.results?.ZA
+  // Name the episode the player will actually open: the unfinished one, or the next after a finished one.
+  const tvStartEpisode = resumeTarget && mediaSources
+    ? resolveStartEpisode(mediaSources, resumeTarget, resumeTargetWatched)
+    : null
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-0 sm:p-6 md:p-10">
@@ -276,7 +296,13 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                             className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-brand-400 px-5 font-black text-zinc-950 transition hover:bg-brand-500"
                           >
                             <Play size={18} fill="currentColor" aria-hidden="true" />
-                            {mediaType === 'movie' ? 'Watch Movie' : lastWatched ? `Resume S${lastWatched.seasonNumber} E${lastWatched.episodeNumber}` : 'Watch Show'}
+                            {mediaType === 'movie'
+                              ? movieResume
+                                ? movieResumePosition ? `Resume from ${formatResumeTime(movieResumePosition)}` : 'Resume'
+                                : 'Watch Movie'
+                              : tvStartEpisode
+                                ? `${resumeTargetWatched ? 'Watch' : 'Resume'} S${tvStartEpisode.seasonNumber} E${tvStartEpisode.episodeNumber}`
+                                : 'Watch Show'}
                           </button>
                         ) : null}
                         {watchPartyEnabled && mediaSources !== null && mediaSources.length > 0 && (
@@ -295,6 +321,17 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                             className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 bg-white/7 px-5 font-black text-white transition hover:bg-white/12"
                           >
                             <Play size={18} fill="currentColor" aria-hidden="true" />Watch trailer
+                          </button>
+                        )}
+                        {movie && (
+                          <button
+                            type="button"
+                            onClick={() => toggleMovieWatched(id)}
+                            aria-pressed={movieWatched}
+                            className={`inline-flex min-h-12 items-center gap-2 rounded-xl border px-5 font-black transition ${movieWatched ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200' : 'border-white/15 bg-white/7 text-white hover:bg-white/12'}`}
+                          >
+                            <Check size={18} aria-hidden="true" />
+                            {movieWatched ? 'Watched' : 'Mark as watched'}
                           </button>
                         )}
                         <button
@@ -330,6 +367,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                       id={id}
                       mediaType={mediaType}
                       title={item.title}
+                      media={item}
                       numberOfSeasons={tv?.number_of_seasons}
                       sources={mediaSources}
                       theaterMode={theaterMode}

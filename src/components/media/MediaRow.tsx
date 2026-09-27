@@ -1,7 +1,7 @@
 import type { MediaItem } from '../../types/tmdb'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { CardSkeleton } from '../ui/LoadingSkeleton'
-import { MediaCard } from './MediaCard'
+import { MediaCard, type MediaCardVariant } from './MediaCard'
 import { useDragScroll } from '../../hooks/useDragScroll'
 
 export function MediaRow({
@@ -11,6 +11,7 @@ export function MediaRow({
   loading,
   error,
   onRetry,
+  variant,
 }: {
   id?: string
   title: string
@@ -18,6 +19,7 @@ export function MediaRow({
   loading: boolean
   error: string | null
   onRetry?: () => void
+  variant?: MediaCardVariant
 }) {
   const scrollRef = useDragScroll()
 
@@ -48,7 +50,7 @@ export function MediaRow({
             ) : (
               items.map((item) => (
                 <div key={`${item.mediaType}-${item.id}`} className="snap-start">
-                  <MediaCard item={item} row />
+                  <MediaCard item={item} row variant={variant} />
                 </div>
               ))
             )}
