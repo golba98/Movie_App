@@ -3,7 +3,7 @@ import { runDurableObjectAlarm, SELF } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { PASSWORD_ITERATIONS } from '../crypto'
 import worker from '../index'
-import { classifyPlaybackKind, extractDirectPlayerUrl } from '../media-sources'
+import { classifyPlaybackKind, embedBlockReasonFromHeaders, extractDirectPlayerUrl } from '../media-sources'
 import { driftCorrection, expectedPlaybackPosition } from '../../src/types/watch-party'
 
 const origin = 'https://fedora.test'
@@ -454,27 +454,70 @@ describe('authorised media-source catalog', () => {
   it('shares and caches concurrent player resolutions for the same source', async () => {
     const { viewer } = await activeViewerCookies()
     const sourceUrl = 'https://resolver.example.test/cacheable-title'
-    const outbound = vi.fn(async () => {
+    const outbound = vi.fn<(input: RequestInfo | URL) => Promise<Response>>(async () => {
       await Promise.resolve()
       return new Response('<iframe src="https://player.example.test/cacheable"></iframe>', { status: 200 })
     })
+    const callsTo = (url: string) => outbound.mock.calls.filter(([input]) => String(input) === url).length
     vi.stubGlobal('fetch', outbound)
     try {
       const path = `/api/media-sources/extract?url=${encodeURIComponent(sourceUrl)}`
+      const expected = { data: { extractedUrl: 'https://player.example.test/cacheable', embedBlocked: null } }
       const [first, second] = await Promise.all([
         request(path, { cookie: viewer }),
         request(path, { cookie: viewer }),
       ])
-      expect(await first.json()).toEqual({ data: { extractedUrl: 'https://player.example.test/cacheable' } })
-      expect(await second.json()).toEqual({ data: { extractedUrl: 'https://player.example.test/cacheable' } })
-      expect(outbound).toHaveBeenCalledOnce()
+      expect(await first.json()).toEqual(expected)
+      expect(await second.json()).toEqual(expected)
+      expect(callsTo(sourceUrl)).toBe(1)
+      expect(callsTo('https://player.example.test/cacheable')).toBe(1)
 
       const third = await request(path, { cookie: viewer })
-      expect(await third.json()).toEqual({ data: { extractedUrl: 'https://player.example.test/cacheable' } })
-      expect(outbound).toHaveBeenCalledOnce()
+      expect(await third.json()).toEqual(expected)
+      expect(callsTo(sourceUrl)).toBe(1)
+      expect(callsTo('https://player.example.test/cacheable')).toBe(1)
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it('reports providers that explicitly refuse to be embedded', async () => {
+    const { viewer } = await activeViewerCookies()
+    const sourceUrl = 'https://resolver.example.test/refusing-title'
+    const outbound = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === sourceUrl) {
+        return new Response('<iframe src="https://refusing-player.example.test/embed"></iframe>', { status: 200 })
+      }
+      return new Response('<!doctype html>', { status: 200, headers: { 'X-Frame-Options': 'DENY' } })
+    })
+    vi.stubGlobal('fetch', outbound)
+    try {
+      const response = await request(`/api/media-sources/extract?url=${encodeURIComponent(sourceUrl)}`, { cookie: viewer })
+      expect(await response.json()).toEqual({
+        data: { extractedUrl: 'https://refusing-player.example.test/embed', embedBlocked: 'x-frame-options' },
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('classifies explicit anti-framing headers without treating other responses as refusals', () => {
+    const app = 'https://fedora.test'
+    const check = (headers: HeadersInit) => embedBlockReasonFromHeaders(new Headers(headers), app)
+    expect(check({ 'X-Frame-Options': 'DENY' })).toBe('x-frame-options')
+    expect(check({ 'X-Frame-Options': 'sameorigin' })).toBe('x-frame-options')
+    expect(check({ 'X-Frame-Options': 'ALLOW-FROM https://fedora.test' })).toBeNull()
+    expect(check({ 'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'" })).toBe('frame-ancestors')
+    expect(check({ 'Content-Security-Policy': "frame-ancestors 'self'" })).toBe('frame-ancestors')
+    expect(check({ 'Content-Security-Policy': 'frame-ancestors https://other.test' })).toBe('frame-ancestors')
+    expect(check({ 'Content-Security-Policy': 'frame-ancestors https://fedora.test' })).toBeNull()
+    expect(check({ 'Content-Security-Policy': 'frame-ancestors *.test' })).toBeNull()
+    expect(check({ 'Content-Security-Policy': 'frame-ancestors https:' })).toBeNull()
+    expect(check({ 'Content-Security-Policy': 'frame-ancestors *' })).toBeNull()
+    // frame-ancestors supersedes X-Frame-Options when both are present.
+    expect(check({ 'Content-Security-Policy': 'frame-ancestors *', 'X-Frame-Options': 'DENY' })).toBeNull()
+    expect(check({ 'Content-Security-Policy': "default-src 'self'" })).toBeNull()
+    expect(check({})).toBeNull()
   })
 
   it('classifies resolved URLs by how they can be played', () => {

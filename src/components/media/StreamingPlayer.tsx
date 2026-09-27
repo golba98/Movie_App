@@ -17,15 +17,56 @@ import { getTvSeasonDetails } from '../../api/tmdb'
 import { useTheaterFullscreen } from '../../hooks/useTheaterFullscreen'
 import { useVideoDiagnostics } from '../../hooks/useVideoDiagnostics'
 import { useWatchedHistory } from '../../hooks/useWatchedHistory'
-import type { MediaSource } from '../../types/media-source'
+import type { EmbedBlockReason, MediaSource } from '../../types/media-source'
 import type { Episode, MediaType } from '../../types/tmdb'
 import { imageUrl } from '../../utils/images'
+import {
+  logIframeConfiguration,
+  PLAYER_IFRAME_ALLOW,
+  PLAYER_IFRAME_REFERRER_POLICY,
+  playerDebug,
+  urlHost,
+} from '../../utils/playerDebug'
 
 const EXTRACTION_TIMEOUT_MS = 15_000
 const IFRAME_LOAD_TIMEOUT_MS = 12_000
 const IFRAME_REVEAL_DELAY_MS = 180
 
-type DynamicPlayerStatus = 'idle' | 'extracting' | 'ready' | 'error'
+type SourceFailureReason = 'no-player' | 'extract-timeout' | 'extract-error' | 'load-timeout' | 'embed-blocked' | 'media-error'
+
+// Each source keeps its own player state so one failing source never
+// clobbers another one's progress or error.
+type SourcePlayerState =
+  | { status: 'extracting' }
+  | { status: 'ready'; extractedUrl: string }
+  | { status: 'failed'; reason: SourceFailureReason; message: string }
+
+const SOURCE_FAILURE_MESSAGES: Record<SourceFailureReason, string> = {
+  'no-player': 'This source did not return a usable embedded player. You can retry or exit safely.',
+  'extract-timeout': 'The player took too long to prepare. You can retry or exit safely.',
+  'extract-error': 'The player could not be prepared. You can retry or exit safely.',
+  'load-timeout': 'The embedded player did not finish loading. You can retry or stop safely.',
+  'embed-blocked': "This provider doesn't allow its player to be embedded here. Try another source.",
+  'media-error': 'The authorised video could not be loaded. Check the source format and host response.',
+}
+
+function withoutSource(states: Record<string, SourcePlayerState>, sourceId: string) {
+  if (!(sourceId in states)) return states
+  const next = { ...states }
+  delete next[sourceId]
+  return next
+}
+
+function getSourceLabel(source: MediaSource) {
+  const cleanLabel = source.label.replace(' Stream (Dynamic)', '')
+  if (cleanLabel.toLowerCase().includes('flixbaba')) {
+    return 'Source 1'
+  }
+  if (cleanLabel.toLowerCase().includes('soap2day')) {
+    return 'Source 2'
+  }
+  return cleanLabel
+}
 
 function isDynamicSource(source: MediaSource | undefined) {
   if (!source) return false
@@ -33,7 +74,7 @@ function isDynamicSource(source: MediaSource | undefined) {
   return Boolean(source.isDynamic || sourceUrl.includes('flixbaba') || sourceUrl.includes('soap2day'))
 }
 
-function isEmbeddableUrl(candidate: string | null, wrapperUrl: string) {
+function isEmbeddableUrl(candidate: string | null, wrapperUrl: string): candidate is string {
   if (!candidate) return false
   try {
     const extracted = new URL(candidate)
@@ -126,12 +167,10 @@ export function StreamingPlayer({
   const [loadingEpisodes, setLoadingEpisodes] = useState(mediaType === 'tv')
   const [episodesError, setEpisodesError] = useState<string | null>(null)
   const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
-  const [extractedUrl, setExtractedUrl] = useState<string | null>(null)
-  const [dynamicPlayerStatus, setDynamicPlayerStatus] = useState<DynamicPlayerStatus>('idle')
-  const [dynamicPlayerError, setDynamicPlayerError] = useState<string | null>(null)
+  const [sourceStates, setSourceStates] = useState<Record<string, SourcePlayerState>>({})
   const [extractionAttempt, setExtractionAttempt] = useState(0)
   const [inlinePlaybackRequested, setInlinePlaybackRequested] = useState(false)
-  const [iframeLoaded, setIframeLoaded] = useState(false)
+  const [loadedIframeKey, setLoadedIframeKey] = useState<string | null>(null)
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
   const [videoDuration, setVideoDuration] = useState(0)
   const [videoPlaying, setVideoPlaying] = useState(false)
@@ -142,15 +181,38 @@ export function StreamingPlayer({
   const exitButtonRef = useRef<HTMLButtonElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const iframeRevealTimerRef = useRef<number | null>(null)
+  const sourceStatesRef = useRef(sourceStates)
+  const previousActiveSourceIdRef = useRef<string | null>(null)
 
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
-  const [failedSourceIds, setFailedSourceIds] = useState<Set<string>>(() => new Set())
+
+  useEffect(() => {
+    sourceStatesRef.current = sourceStates
+  }, [sourceStates])
 
   useEffect(() => {
     setSelectedSourceId(null)
-    setFailedSourceIds(new Set())
+    setSourceStates({})
+    setLoadedIframeKey(null)
     setInlinePlaybackRequested(false)
   }, [id, activeSeason, activeEpisode])
+
+  const failedSourceIds = useMemo(
+    () => new Set(Object.keys(sourceStates).filter((sourceId) => sourceStates[sourceId].status === 'failed')),
+    [sourceStates],
+  )
+
+  const markSourceFailed = useCallback((source: MediaSource, reason: SourceFailureReason, message?: string) => {
+    playerDebug('source failed', { sourceId: source.id, label: getSourceLabel(source), reason })
+    setSourceStates((prev) => ({
+      ...prev,
+      [source.id]: { status: 'failed', reason, message: message ?? SOURCE_FAILURE_MESSAGES[reason] },
+    }))
+  }, [])
+
+  const resetSource = (sourceId: string) => {
+    setSourceStates((prev) => withoutSource(prev, sourceId))
+  }
 
   // Sync state if id changes
   useEffect(() => {
@@ -265,32 +327,42 @@ export function StreamingPlayer({
 
   const activeSource = useMemo(() => {
     if (playableSources.length === 0) return undefined
-    const nonFailedSources = playableSources.filter((s) => !failedSourceIds.has(s.id))
-    if (nonFailedSources.length > 0) {
-      if (selectedSourceId) {
-        const selected = nonFailedSources.find((s) => s.id === selectedSourceId)
-        if (selected) return selected
-      }
-      return nonFailedSources[0]
-    }
+    // An explicit choice wins even when it failed, so the user sees that
+    // source's own error instead of being silently moved elsewhere.
     if (selectedSourceId) {
       const selected = playableSources.find((s) => s.id === selectedSourceId)
       if (selected) return selected
     }
-    return playableSources[0]
+    return playableSources.find((s) => !failedSourceIds.has(s.id)) ?? playableSources[0]
   }, [playableSources, selectedSourceId, failedSourceIds])
   const activeSourceIsDynamic = isDynamicSource(activeSource)
-  const getSourceLabel = (source: MediaSource) => {
-    const cleanLabel = source.label.replace(' Stream (Dynamic)', '')
-    if (cleanLabel.toLowerCase().includes('flixbaba')) {
-      return 'Source 1'
-    }
-    if (cleanLabel.toLowerCase().includes('soap2day')) {
-      return 'Source 2'
-    }
-    return cleanLabel
-  }
+  const activeSourceState = activeSource ? sourceStates[activeSource.id] : undefined
+  const activeExtractedUrl = activeSourceState?.status === 'ready' ? activeSourceState.extractedUrl : null
+  const iframeKey = activeSource && activeExtractedUrl ? `${activeSource.id}|${activeExtractedUrl}` : null
+  const iframeLoaded = iframeKey !== null && loadedIframeKey === iframeKey
   const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
+
+  useEffect(() => {
+    const previousId = previousActiveSourceIdRef.current
+    previousActiveSourceIdRef.current = activeSource?.id ?? null
+    if (!activeSource || !previousId || previousId === activeSource.id) return
+    playerDebug('switching source', {
+      from: previousId,
+      to: activeSource.id,
+      label: getSourceLabel(activeSource),
+      reason: selectedSourceId === activeSource.id ? 'user' : 'auto-fallback',
+    })
+  }, [activeSource, selectedSourceId])
+
+  // A new playback session retries sources that failed in the previous one.
+  useEffect(() => {
+    if (dynamicPlaybackRequested) return
+    setLoadedIframeKey(null)
+    setSourceStates((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([, state]) => state.status === 'ready'))
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+    })
+  }, [dynamicPlaybackRequested])
 
 
 
@@ -320,12 +392,9 @@ export function StreamingPlayer({
   }, [activeSeason, id, mediaType])
 
   useEffect(() => {
-    if (!dynamicPlaybackRequested || !activeSource || !activeSource.sourceUrl || !activeSourceIsDynamic) {
-      setExtractedUrl(null)
-      setDynamicPlayerStatus('idle')
-      setDynamicPlayerError(null)
-      return
-    }
+    if (!dynamicPlaybackRequested || !activeSource || !activeSource.sourceUrl || !activeSourceIsDynamic) return
+    const existing = sourceStatesRef.current[activeSource.id]
+    if (existing?.status === 'ready' || existing?.status === 'failed') return
 
     const currentSource = activeSource
     const controller = new AbortController()
@@ -335,96 +404,67 @@ export function StreamingPlayer({
       controller.abort()
     }, EXTRACTION_TIMEOUT_MS)
 
-    setDynamicPlayerStatus('extracting')
-    setDynamicPlayerError(null)
-    setExtractedUrl(null)
+    playerDebug('loading source', {
+      sourceId: currentSource.id,
+      label: getSourceLabel(currentSource),
+      host: urlHost(currentSource.sourceUrl),
+    })
+    setSourceStates((prev) => ({ ...prev, [currentSource.id]: { status: 'extracting' } }))
 
-    apiRequest<{ extractedUrl: string | null }>(
+    apiRequest<{ extractedUrl: string | null; embedBlocked?: EmbedBlockReason | null }>(
       `/api/media-sources/extract?url=${encodeURIComponent(currentSource.sourceUrl)}`,
       { signal: controller.signal },
     )
       .then((data) => {
         window.clearTimeout(timeout)
-        if (!isEmbeddableUrl(data.extractedUrl, currentSource.sourceUrl)) {
-          const otherSource = playableSources.find((s) => s.id !== currentSource.id && !failedSourceIds.has(s.id))
-          if (otherSource) {
-            setFailedSourceIds((prev) => {
-              const next = new Set(prev)
-              next.add(currentSource.id)
-              return next
-            })
-          } else {
-            setDynamicPlayerStatus('error')
-            setDynamicPlayerError('This source did not return a usable embedded player. You can retry or exit safely.')
-          }
+        if (data.embedBlocked) {
+          playerDebug('provider refused embedding', {
+            sourceId: currentSource.id,
+            host: urlHost(data.extractedUrl),
+            reason: data.embedBlocked,
+          })
+          markSourceFailed(currentSource, 'embed-blocked')
           return
         }
-        setExtractedUrl(data.extractedUrl)
-        setDynamicPlayerStatus('ready')
+        if (!isEmbeddableUrl(data.extractedUrl, currentSource.sourceUrl)) {
+          markSourceFailed(currentSource, 'no-player')
+          return
+        }
+        const extractedUrl = data.extractedUrl
+        setSourceStates((prev) => ({ ...prev, [currentSource.id]: { status: 'ready', extractedUrl } }))
       })
       .catch((error: unknown) => {
         window.clearTimeout(timeout)
         if (controller.signal.aborted && !timedOut) return
         if (!timedOut) console.error('Extractor failed:', error)
-        const otherSource = playableSources.find((s) => s.id !== currentSource.id && !failedSourceIds.has(s.id))
-        if (otherSource) {
-          setFailedSourceIds((prev) => {
-            const next = new Set(prev)
-            next.add(currentSource.id)
-            return next
-          })
-        } else {
-          setDynamicPlayerStatus('error')
-          setDynamicPlayerError(
-            timedOut
-              ? 'The player took too long to prepare. You can retry or exit safely.'
-              : 'The player could not be prepared. You can retry or exit safely.',
-          )
-        }
+        markSourceFailed(currentSource, timedOut ? 'extract-timeout' : 'extract-error')
       })
 
     return () => {
       window.clearTimeout(timeout)
       controller.abort()
+      // Drop an interrupted extraction so the source is fetched again next time.
+      setSourceStates((prev) => (
+        prev[currentSource.id]?.status === 'extracting' ? withoutSource(prev, currentSource.id) : prev
+      ))
     }
-  }, [activeSource, activeSourceIsDynamic, dynamicPlaybackRequested, extractionAttempt, playableSources, failedSourceIds])
+  }, [activeSource, activeSourceIsDynamic, dynamicPlaybackRequested, extractionAttempt, markSourceFailed])
 
   useEffect(() => {
-    setIframeLoaded(false)
-    if (iframeRevealTimerRef.current !== null) {
-      window.clearTimeout(iframeRevealTimerRef.current)
-      iframeRevealTimerRef.current = null
-    }
-    return () => {
-      if (iframeRevealTimerRef.current !== null) {
-        window.clearTimeout(iframeRevealTimerRef.current)
-        iframeRevealTimerRef.current = null
-      }
-    }
-  }, [dynamicPlayerStatus, extractedUrl])
+    if (!dynamicPlaybackRequested || !iframeKey) return
+    logIframeConfiguration('streaming-player')
+  }, [dynamicPlaybackRequested, iframeKey])
+
+  useEffect(() => () => {
+    if (iframeRevealTimerRef.current !== null) window.clearTimeout(iframeRevealTimerRef.current)
+  }, [])
 
   useEffect(() => {
-    if (dynamicPlayerStatus !== 'ready' || !extractedUrl || iframeLoaded || !activeSource) return
-
+    if (!dynamicPlaybackRequested || !iframeKey || iframeLoaded || !activeSource) return
     const currentSource = activeSource
-    const timeout = window.setTimeout(() => {
-      const otherSource = playableSources.find((s) => s.id !== currentSource.id && !failedSourceIds.has(s.id))
-      if (otherSource) {
-        setFailedSourceIds((prev) => {
-          const next = new Set(prev)
-          next.add(currentSource.id)
-          return next
-        })
-      } else {
-        setDynamicPlayerStatus('error')
-        setDynamicPlayerError('The embedded player did not finish loading. You can retry or stop safely.')
-      }
-    }, IFRAME_LOAD_TIMEOUT_MS)
-
+    const timeout = window.setTimeout(() => markSourceFailed(currentSource, 'load-timeout'), IFRAME_LOAD_TIMEOUT_MS)
     return () => window.clearTimeout(timeout)
-  }, [dynamicPlayerStatus, extractedUrl, iframeLoaded, activeSource, playableSources, failedSourceIds])
-
-
+  }, [dynamicPlaybackRequested, iframeKey, iframeLoaded, activeSource, markSourceFailed])
 
   const catalogEpisodes = useMemo(() => {
     const byEpisode = new Map(episodes.map((episode) => [episode.episode_number, episode]))
@@ -479,7 +519,12 @@ export function StreamingPlayer({
     )
   }
 
-  const currentMediaError = mediaError?.sourceId === activeSource.id ? mediaError.message : null
+  const currentMediaError = mediaError?.sourceId === activeSource.id
+    ? mediaError.message
+    : !activeSourceIsDynamic && activeSourceState?.status === 'failed'
+      ? activeSourceState.message
+      : null
+  const fallbackSource = playableSources.find((s) => s.id !== activeSource.id && !failedSourceIds.has(s.id))
   const safeDuration = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : 0
 
   const toggleVideoPlayback = () => {
@@ -521,10 +566,10 @@ export function StreamingPlayer({
     setVideoMuted(volume === 0)
   }
 
-  const revealIframe = () => {
+  const revealIframe = (loadedKey: string) => {
     if (iframeRevealTimerRef.current !== null) window.clearTimeout(iframeRevealTimerRef.current)
     iframeRevealTimerRef.current = window.setTimeout(() => {
-      setIframeLoaded(true)
+      setLoadedIframeKey(loadedKey)
       iframeRevealTimerRef.current = null
       handleStartPlayback()
     }, IFRAME_REVEAL_DELAY_MS)
@@ -579,11 +624,7 @@ export function StreamingPlayer({
                   onClick={() => {
                     setInlinePlaybackRequested(false)
                     setSelectedSourceId(source.id)
-                    setFailedSourceIds((prev) => {
-                      const next = new Set(prev)
-                      next.delete(source.id)
-                      return next
-                    })
+                    if (failedSourceIds.has(source.id)) resetSource(source.id)
                   }}
                   className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 pointer-coarse:min-h-11 ${
                     activeSource?.id === source.id
@@ -641,17 +682,18 @@ export function StreamingPlayer({
                     </button>
                   </div>
                 </div>
-              ) : dynamicPlayerStatus === 'ready' && extractedUrl ? (
+              ) : activeExtractedUrl && iframeKey ? (
                 <div className="relative size-full bg-black">
+                  {/* No sandbox: providers refuse to run in sandboxed frames. See utils/playerDebug.ts. */}
                   <iframe
-                    src={extractedUrl}
+                    key={iframeKey}
+                    src={activeExtractedUrl}
                     className={`block size-full border-0 bg-black object-contain transition-opacity duration-200 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
-                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                    allow={PLAYER_IFRAME_ALLOW}
                     allowFullScreen
-                    referrerPolicy="origin"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-popups-to-escape-sandbox"
+                    referrerPolicy={PLAYER_IFRAME_REFERRER_POLICY}
                     aria-label={`Video player for ${title}`}
-                    onLoad={revealIframe}
+                    onLoad={() => revealIframe(iframeKey)}
                   />
                   {!iframeLoaded && (
                     <div role="status" className="absolute inset-0 z-10 grid place-items-center bg-black px-6 text-center">
@@ -664,27 +706,38 @@ export function StreamingPlayer({
                     </div>
                   )}
                 </div>
-              ) : dynamicPlayerStatus === 'error' ? (
+              ) : activeSourceState?.status === 'failed' ? (
                 <div className="grid size-full place-items-center bg-black px-6 text-center">
                   <div role="alert" className="max-w-md">
                     <span className="mx-auto grid size-14 place-items-center rounded-full border border-red-400/20 bg-red-400/10 text-red-200">
                       <AlertCircle aria-hidden="true" />
                     </span>
                     <h3 className="mt-4 text-lg font-semibold text-white">Player unavailable</h3>
-                    <p className="mt-2 text-sm leading-6 text-zinc-400">{dynamicPlayerError}</p>
+                    {playableSources.length > 1 && (
+                      <p className="mt-1 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{getSourceLabel(activeSource)}</p>
+                    )}
+                    <p className="mt-2 text-sm leading-6 text-zinc-400">{activeSourceState.message}</p>
                     <div className="mt-5 flex flex-wrap justify-center gap-3">
                       <button
                         type="button"
                         onClick={() => {
-                          setFailedSourceIds(new Set())
+                          resetSource(activeSource.id)
                           setMediaError(null)
-                          setDynamicPlayerError(null)
                           setExtractionAttempt((attempt) => attempt + 1)
                         }}
                         className="min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
                       >
                         Retry player
                       </button>
+                      {fallbackSource && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSourceId(fallbackSource.id)}
+                          className="min-h-11 rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
+                        >
+                          Try {getSourceLabel(fallbackSource)}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -760,20 +813,7 @@ export function StreamingPlayer({
                   }}
                   onError={(event) => {
                     const video = event.currentTarget
-                    const errorMessage = video.error?.message || 'The authorised video could not be loaded. Check the source format and host response.'
-                    const otherSource = playableSources.find((s) => s.id !== activeSource.id && !failedSourceIds.has(s.id))
-                    if (otherSource) {
-                      setFailedSourceIds((prev) => {
-                        const next = new Set(prev)
-                        next.add(activeSource.id)
-                        return next
-                      })
-                    } else {
-                      setMediaError({
-                        sourceId: activeSource.id,
-                        message: errorMessage,
-                      })
-                    }
+                    markSourceFailed(activeSource, 'media-error', video.error?.message || undefined)
                   }}
                 />
                 <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/95 via-black/70 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4">

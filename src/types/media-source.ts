@@ -16,6 +16,10 @@ export interface MediaSource {
   isDynamic?: boolean
 }
 
+// Returned by the extract endpoint when the resolved player explicitly refuses
+// to be framed by this app (see worker/media-sources.ts probeEmbedPolicy).
+export type EmbedBlockReason = 'x-frame-options' | 'frame-ancestors'
+
 export interface AdminMediaSource extends MediaSource {
   rightsNote: string
   active: boolean
