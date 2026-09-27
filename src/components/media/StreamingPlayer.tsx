@@ -531,6 +531,9 @@ export function StreamingPlayer({
       ? activeSourceState.message
       : null
   const fallbackSource = playableSources.find((s) => s.id !== activeSource.id && !failedSourceIds.has(s.id))
+  // Only real media keeps a fixed 16:9 box on phones; the idle, preparing and
+  // failed panels are taller than a phone-width 16:9 box and would be clipped.
+  const showsMedia = !activeSourceIsDynamic || (dynamicPlaybackRequested && Boolean(activeExtractedUrl && iframeKey))
   const safeDuration = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : 0
 
   const toggleVideoPlayback = () => {
@@ -583,8 +586,8 @@ export function StreamingPlayer({
 
   return (
     <section id="streaming-player" className="scroll-mt-20" aria-labelledby="player-heading">
-      <div className={`grid grid-cols-1 gap-6 ${theaterMode || mediaType === 'movie' ? '' : 'lg:grid-cols-3'}`}>
-        <div className={theaterMode || mediaType === 'movie' ? 'w-full' : 'lg:col-span-2'}>
+      <div className={`grid grid-cols-1 gap-6 ${theaterMode || mediaType === 'movie' ? '' : 'lg:grid-cols-[minmax(0,1fr)_320px]'}`}>
+        <div className="min-w-0">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1">
             <div className="min-w-0">
               <h2 id="player-heading" className="mt-1 line-clamp-1 text-lg font-black text-white">
@@ -648,10 +651,13 @@ export function StreamingPlayer({
               iframe/video in the DOM would remount it and restart playback. */}
           <div
             ref={playerShellRef}
+            data-testid="player-shell"
             className={
               theaterMode
                 ? 'fixed inset-0 z-50 flex items-center justify-center bg-black'
-                : 'relative w-full aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10'
+                : `relative w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 ${
+                  showsMedia ? 'aspect-video' : 'min-h-56 sm:aspect-video sm:min-h-0'
+                }`
             }
           >
             {theaterMode && (
@@ -667,13 +673,13 @@ export function StreamingPlayer({
             )}
             {activeSourceIsDynamic ? (
               !dynamicPlaybackRequested ? (
-                <div className="grid size-full place-items-center bg-black px-6 text-center">
+                <div className="grid size-full place-items-center bg-black px-5 py-8 text-center sm:px-6">
                   <div className="max-w-md">
-                    <span className="mx-auto grid size-14 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300">
+                    <span className="mx-auto grid size-12 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300 sm:size-14">
                       <Play size={20} fill="currentColor" aria-hidden="true" />
                     </span>
-                    <h3 className="mt-4 text-base font-semibold text-white">Ready when you are</h3>
-                    <p className="mt-2 text-sm leading-6 text-zinc-400">
+                    <h3 className="mt-3 text-base font-semibold text-white sm:mt-4">Ready when you are</h3>
+                    <p className="mt-1.5 text-xs leading-5 text-zinc-400 sm:mt-2 sm:text-sm sm:leading-6">
                       Start playback here, or use Theater mode for a larger view.
                     </p>
                     <button
@@ -682,7 +688,7 @@ export function StreamingPlayer({
                         setInlinePlaybackRequested(true)
                         handleStartPlayback()
                       }}
-                      className="mt-5 min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
+                      className="mt-4 min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200 sm:mt-5"
                     >
                       Play {mediaType === 'movie' ? 'movie' : 'episode'}
                     </button>
@@ -714,17 +720,17 @@ export function StreamingPlayer({
                   )}
                 </div>
               ) : activeSourceState?.status === 'failed' ? (
-                <div className="grid size-full place-items-center bg-black px-6 text-center">
-                  <div role="alert" className="max-w-md">
-                    <span className="mx-auto grid size-14 place-items-center rounded-full border border-red-400/20 bg-red-400/10 text-red-200">
+                <div className="grid size-full place-items-center bg-black px-5 py-8 text-center sm:px-6">
+                  <div role="alert" className="w-full max-w-md">
+                    <span className="mx-auto grid size-12 place-items-center rounded-full border border-red-400/20 bg-red-400/10 text-red-200 sm:size-14">
                       <AlertCircle aria-hidden="true" />
                     </span>
-                    <h3 className="mt-4 text-lg font-semibold text-white">Player unavailable</h3>
+                    <h3 className="mt-3 text-base font-semibold text-white sm:mt-4 sm:text-lg">Player unavailable</h3>
                     {playableSources.length > 1 && (
                       <p className="mt-1 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{getSourceLabel(activeSource)}</p>
                     )}
-                    <p className="mt-2 text-sm leading-6 text-zinc-400">{activeSourceState.message}</p>
-                    <div className="mt-5 flex flex-wrap justify-center gap-3">
+                    <p className="mt-1.5 text-xs leading-5 text-zinc-400 sm:mt-2 sm:text-sm sm:leading-6">{activeSourceState.message}</p>
+                    <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
                       <button
                         type="button"
                         onClick={() => {
@@ -732,7 +738,7 @@ export function StreamingPlayer({
                           setMediaError(null)
                           setExtractionAttempt((attempt) => attempt + 1)
                         }}
-                        className="min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
+                        className="min-h-11 w-full rounded-xl sm:w-auto bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
                       >
                         Retry player
                       </button>
@@ -740,7 +746,7 @@ export function StreamingPlayer({
                         <button
                           type="button"
                           onClick={() => setSelectedSourceId(fallbackSource.id)}
-                          className="min-h-11 rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
+                          className="min-h-11 w-full rounded-xl sm:w-auto border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
                         >
                           Try {getSourceLabel(fallbackSource)}
                         </button>
@@ -751,7 +757,7 @@ export function StreamingPlayer({
                           setInlinePlaybackRequested(false)
                           onTheaterModeChange(false)
                         }}
-                        className="min-h-11 rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
+                        className="min-h-11 w-full rounded-xl sm:w-auto border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
                       >
                         Stop player
                       </button>
@@ -759,7 +765,7 @@ export function StreamingPlayer({
                   </div>
                 </div>
               ) : (
-                <div role="status" className="grid size-full place-items-center bg-black px-6 text-center">
+                <div role="status" className="grid size-full place-items-center bg-black px-5 py-8 text-center sm:px-6">
                   <div>
                     <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
                     <p className="mt-4 text-sm font-semibold text-zinc-300">
@@ -881,7 +887,7 @@ export function StreamingPlayer({
         {mediaType === 'tv' && !theaterMode && (
           <aside className="flex flex-col rounded-3xl border border-white/7 bg-white/[0.025] p-4" aria-labelledby="episodes-heading">
             <div className="mb-3 flex items-center justify-between gap-3 border-b border-white/7 pb-3">
-              <div>
+              <div className="min-w-0">
                 <h3 id="episodes-heading" className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-white">
                   <Play size={12} className="fill-current" aria-hidden="true" />Authorised episodes
                 </h3>
@@ -910,7 +916,7 @@ export function StreamingPlayer({
                 <button
                   type="button"
                   onClick={() => setSeasonDropdownOpen((current) => !current)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-black text-white hover:bg-white/10"
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-black text-white hover:bg-white/10"
                 >
                   Season {activeSeason}<ChevronDown size={14} aria-hidden="true" />
                 </button>
