@@ -25,7 +25,7 @@ export function FavouritesPage() {
           <Link to="/" className="mt-6 inline-flex min-h-12 items-center rounded-xl bg-white px-5 font-black text-zinc-950 transition hover:bg-zinc-200">Explore titles</Link>
         </div>
       ) : (
-        <div className="mt-9 grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-5 lg:grid-cols-5 xl:grid-cols-6">
+        <div className="mt-9 grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {[...favourites].sort((a, b) => b.addedAt - a.addedAt).map((item) => <MediaCard key={`${item.mediaType}-${item.id}`} item={item} />)}
         </div>
       )}
