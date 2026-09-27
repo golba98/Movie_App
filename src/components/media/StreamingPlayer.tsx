@@ -7,6 +7,7 @@ import {
   Minimize2,
   Pause,
   Play,
+  RotateCw,
   Volume2,
   VolumeX,
   X,
@@ -174,6 +175,8 @@ export function StreamingPlayer({
 
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
   const [iframeStart, setIframeStart] = useState<{ key: string; src: string } | null>(null)
+  // Bumped by "Reload player" to remount a provider player that got stuck.
+  const [playerReload, setPlayerReload] = useState(0)
 
   useEffect(() => {
     sourceStatesRef.current = sourceStates
@@ -184,6 +187,7 @@ export function StreamingPlayer({
     setSourceStates({})
     setLoadedIframeKey(null)
     setInlinePlaybackRequested(false)
+    setPlayerReload(0)
   }, [id, activeSeason, activeEpisode])
 
   const failedSourceIds = useMemo(
@@ -338,7 +342,7 @@ export function StreamingPlayer({
   const activeSourceIsDynamic = isDynamicSource(activeSource)
   const activeSourceState = activeSource ? sourceStates[activeSource.id] : undefined
   const activeExtractedUrl = activeSourceState?.status === 'ready' ? activeSourceState.extractedUrl : null
-  const iframeKey = activeSource && activeExtractedUrl ? `${activeSource.id}|${activeExtractedUrl}` : null
+  const iframeKey = activeSource && activeExtractedUrl ? `${activeSource.id}|${activeExtractedUrl}|${playerReload}` : null
   const iframeLoaded = iframeKey !== null && loadedIframeKey === iframeKey
   const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
 
@@ -533,7 +537,8 @@ export function StreamingPlayer({
   const fallbackSource = playableSources.find((s) => s.id !== activeSource.id && !failedSourceIds.has(s.id))
   // Only real media keeps a fixed 16:9 box on phones; the idle, preparing and
   // failed panels are taller than a phone-width 16:9 box and would be clipped.
-  const showsMedia = !activeSourceIsDynamic || (dynamicPlaybackRequested && Boolean(activeExtractedUrl && iframeKey))
+  const showsIframe = activeSourceIsDynamic && dynamicPlaybackRequested && Boolean(activeExtractedUrl && iframeKey)
+  const showsMedia = !activeSourceIsDynamic || showsIframe
   const safeDuration = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : 0
 
   const toggleVideoPlayback = () => {
@@ -575,6 +580,16 @@ export function StreamingPlayer({
     setVideoMuted(volume === 0)
   }
 
+  // The provider's own buffering spinner lives inside its cross-origin frame,
+  // where we can't clear it; reloading the frame at the last saved position is
+  // the way out when it sticks.
+  const reloadPlayer = () => {
+    const pending = pendingProgressRef.current
+    pendingProgressRef.current = null
+    if (pending) recordProgress(mediaType, id, pending.season, pending.episode, pending.position, pending.duration)
+    setPlayerReload((count) => count + 1)
+  }
+
   const revealIframe = (loadedKey: string) => {
     if (iframeRevealTimerRef.current !== null) window.clearTimeout(iframeRevealTimerRef.current)
     iframeRevealTimerRef.current = window.setTimeout(() => {
@@ -595,6 +610,17 @@ export function StreamingPlayer({
               </h2>
             </div>
             <div className="flex items-center gap-2">
+              {showsIframe && !theaterMode && (
+                <button
+                  type="button"
+                  onClick={reloadPlayer}
+                  className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
+                  aria-label="Reload player"
+                  title="Stuck loading? Reload player"
+                >
+                  <RotateCw size={17} aria-hidden="true" />
+                </button>
+              )}
               {activeSourceIsDynamic && inlinePlaybackRequested && !theaterMode && (
                 <button
                   type="button"
@@ -669,6 +695,17 @@ export function StreamingPlayer({
                 aria-label="Exit theater mode"
               >
                 <Minimize2 size={18} aria-hidden="true" />
+              </button>
+            )}
+            {theaterMode && showsIframe && (
+              <button
+                type="button"
+                onClick={reloadPlayer}
+                className="absolute right-[4.25rem] top-4 z-20 grid size-11 place-items-center rounded-full bg-black/70 text-zinc-200 ring-1 ring-white/15 backdrop-blur transition hover:bg-black/90 hover:text-white"
+                aria-label="Reload player"
+                title="Stuck loading? Reload player"
+              >
+                <RotateCw size={18} aria-hidden="true" />
               </button>
             )}
             {activeSourceIsDynamic ? (
