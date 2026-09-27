@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
 
 const movie = {
   id: 1,
@@ -801,7 +801,9 @@ test('dynamic players start inline, can expand to theater mode, and always leave
   const iframe = page.locator('#streaming-player iframe')
   await expect(iframe).toHaveAttribute('src', embedUrl)
   await expect(iframe).toHaveAttribute('allowfullscreen', '')
-  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-popups-to-escape-sandbox')
+  // Providers refuse to run inside sandboxed frames, so the player must not add one.
+  await expect(iframe).not.toHaveAttribute('sandbox')
+  await expect(iframe).toHaveAttribute('referrerpolicy', 'origin')
   await expect(iframe).toHaveAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen')
   await expect(page.getByRole('status')).toContainText('Loading player')
   expect(wrapperRequests).toBe(0)
@@ -900,6 +902,92 @@ test('player automatically falls back to the next available source if the first 
     'https://serverone.test/movie/1',
     'https://servertwo.test/movie/1'
   ])
+})
+
+const fallbackSources = [
+  {
+    id: 'server-one',
+    mediaType: 'movie',
+    tmdbId: 1,
+    seasonNumber: null,
+    episodeNumber: null,
+    label: 'Server One (Dynamic)',
+    sourceUrl: 'https://serverone.test/movie/1',
+    mimeType: 'video/mp4',
+    rightsBasis: 'licensed',
+    isDynamic: true,
+  },
+  {
+    id: 'server-two',
+    mediaType: 'movie',
+    tmdbId: 1,
+    seasonNumber: null,
+    episodeNumber: null,
+    label: 'Server Two (Dynamic)',
+    sourceUrl: 'https://servertwo.test/movie/1',
+    mimeType: 'video/mp4',
+    rightsBasis: 'licensed',
+    isDynamic: true,
+  },
+]
+
+async function mockTwoSourcePlayer(page: Page, failFirstSource: (route: Route) => Promise<void>) {
+  const embedUrl = 'https://player.example.test/embed/movie/1'
+  await page.route('**/api/media-sources/movie/1', async (route) => {
+    await route.fulfill({ json: { data: { sources: fallbackSources } } })
+  })
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    const urlParam = new URL(route.request().url()).searchParams.get('url') ?? ''
+    if (urlParam.includes('serverone')) return failFirstSource(route)
+    return route.fulfill({ json: { data: { extractedUrl: embedUrl, embedBlocked: null } } })
+  })
+  await page.route('https://player.example.test/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Test player</title>' })
+  })
+  return embedUrl
+}
+
+test('a provider that refuses embedding fails only its own source and offers the other one', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const embedUrl = await mockTwoSourcePlayer(page, (route) => route.fulfill({
+    json: { data: { extractedUrl: 'https://blocked-player.test/embed/movie/1', embedBlocked: 'x-frame-options' } },
+  }))
+
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Play movie' }).click()
+
+  const iframe = page.locator('#streaming-player iframe')
+  await expect(iframe).toHaveAttribute('src', embedUrl)
+  await expect(page.locator('#streaming-player button', { hasText: 'Server Two' })).toHaveClass(/bg-emerald-500/)
+  await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
+
+  // Choosing the refused source explicitly shows that source's own error.
+  await page.locator('#streaming-player button', { hasText: 'Server One' }).click()
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  const alert = page.locator('#streaming-player').getByRole('alert')
+  await expect(alert).toContainText("This provider doesn't allow its player to be embedded here")
+  await expect(iframe).toHaveCount(0)
+
+  await alert.getByRole('button', { name: 'Try Server Two (Dynamic)' }).click()
+  await expect(iframe).toHaveAttribute('src', embedUrl)
+  await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
+})
+
+test('an extractor error on one source does not break the other source', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const embedUrl = await mockTwoSourcePlayer(page, (route) => route.fulfill({
+    status: 500,
+    json: { error: { code: 'INTERNAL', message: 'Extractor exploded' } },
+  }))
+
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Play movie' }).click()
+
+  const iframe = page.locator('#streaming-player iframe')
+  await expect(iframe).toHaveAttribute('src', embedUrl)
+  await expect(iframe).not.toHaveAttribute('sandbox')
+  await expect(page.locator('#streaming-player button', { hasText: 'Server Two' })).toHaveClass(/bg-emerald-500/)
+  await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
 })
 
 test('watched history persists and shows progress for movies and TV episodes', async ({ page }) => {

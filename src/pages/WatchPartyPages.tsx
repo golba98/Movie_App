@@ -8,6 +8,7 @@ import { useWatchParty } from '../hooks/useWatchParty'
 import type { WatchPartyClientRequest, WatchPartyState } from '../types/watch-party'
 import { driftCorrection, expectedPlaybackPosition } from '../types/watch-party'
 import { imageUrl } from '../utils/images'
+import { logIframeConfiguration, PLAYER_IFRAME_ALLOW, PLAYER_IFRAME_REFERRER_POLICY } from '../utils/playerDebug'
 import {
   extensionSocketUrl,
   isExtensionBridgeMessage,
@@ -133,13 +134,14 @@ function SynchronizedPlayer({ state, playbackUrl, playbackKind, canControl, send
       return (
         <div>
           <div className="relative aspect-video w-full overflow-hidden rounded-3xl bg-black shadow-2xl ring-1 ring-white/10">
+            {/* No sandbox: providers refuse to run in sandboxed frames. See utils/playerDebug.ts. */}
             <iframe
               src={playbackUrl}
               className="block size-full border-0 bg-black object-contain"
-              allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+              allow={PLAYER_IFRAME_ALLOW}
               allowFullScreen
-              referrerPolicy="origin"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-popups-to-escape-sandbox"
+              referrerPolicy={PLAYER_IFRAME_REFERRER_POLICY}
+              onLoad={() => logIframeConfiguration('watch-party')}
             />
           </div>
           <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-xs leading-5 text-amber-100">

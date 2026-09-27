@@ -35,6 +35,15 @@ interface StreamResolutionCacheRow {
 
 const inFlightStreamResolutions = new Map<string, Promise<string | null>>()
 
+const EMBED_POLICY_PROBE_TIMEOUT_MS = 4_000
+const EMBED_POLICY_CACHE_TTL_MS = 10 * 60 * 1_000
+
+// Why a provider explicitly refuses to be framed by this app. Only explicit
+// response headers count; network errors or 4xx/5xx responses are "unknown".
+export type EmbedBlockReason = 'x-frame-options' | 'frame-ancestors'
+
+const embedPolicyCache = new Map<string, { expiresAt: number; result: Promise<EmbedBlockReason | null> }>()
+
 interface MediaSourceRow {
   id: string
   media_type: MediaType
@@ -520,6 +529,73 @@ export async function resolveAndCachePlayerUrl(db: D1Database, sourceUrl: string
   }
 }
 
+function frameAncestorsAllows(sources: string[], appOrigin: string) {
+  const app = new URL(appOrigin)
+  return sources.some((rawSource) => {
+    const source = rawSource.toLowerCase().replace(/\/$/, '')
+    if (source === '*') return true
+    // 'self' and 'none' refer to the provider, never to this app.
+    if (source.startsWith("'")) return false
+    if (source === app.protocol) return true
+    const match = source.match(/^(?:([a-z][a-z0-9+.-]*):\/\/)?(\*\.)?([^:/]+)(?::(\d+|\*))?$/)
+    if (!match) return false
+    const [, scheme, wildcard, host, port] = match
+    if (scheme && `${scheme}:` !== app.protocol) return false
+    if (port && port !== '*' && port !== (app.port || (app.protocol === 'https:' ? '443' : '80'))) return false
+    return wildcard ? app.hostname.endsWith(`.${host}`) : app.hostname === host
+  })
+}
+
+/** Classify explicit anti-framing headers on a provider response against this app's origin. */
+export function embedBlockReasonFromHeaders(headers: Headers, appOrigin: string): EmbedBlockReason | null {
+  // CSP frame-ancestors supersedes X-Frame-Options in modern browsers.
+  const policies = (headers.get('content-security-policy') ?? '').split(',')
+  let sawFrameAncestors = false
+  for (const policy of policies) {
+    const directive = policy
+      .split(';')
+      .map((part) => part.trim().split(/\s+/))
+      .find(([name]) => name?.toLowerCase() === 'frame-ancestors')
+    if (!directive) continue
+    sawFrameAncestors = true
+    if (!frameAncestorsAllows(directive.slice(1), appOrigin)) return 'frame-ancestors'
+  }
+  if (sawFrameAncestors) return null
+
+  const frameOptions = headers.get('x-frame-options')?.trim().toUpperCase()
+  // ALLOW-FROM is obsolete and ignored by current browsers.
+  if (frameOptions === 'DENY' || frameOptions === 'SAMEORIGIN') return 'x-frame-options'
+  return null
+}
+
+/**
+ * Check whether the resolved player explicitly refuses to be embedded by this app.
+ * This only reads the provider's own policy so the client can fall back cleanly;
+ * it never alters or works around that policy.
+ */
+export function probeEmbedPolicy(url: string, appOrigin: string): Promise<EmbedBlockReason | null> {
+  const cacheKey = `${appOrigin}|${url}`
+  const cached = embedPolicyCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return cached.result
+
+  const result = (async () => {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: AbortSignal.timeout(EMBED_POLICY_PROBE_TIMEOUT_MS),
+      })
+      await response.body?.cancel()
+      return embedBlockReasonFromHeaders(response.headers, appOrigin)
+    } catch {
+      return null
+    }
+  })()
+
+  embedPolicyCache.set(cacheKey, { expiresAt: Date.now() + EMBED_POLICY_CACHE_TTL_MS, result })
+  return result
+}
+
 export async function extractStreamEndpoint(request: Request, env: Env) {
   await requireUser(request, env.DB)
   const url = new URL(request.url)
@@ -535,7 +611,10 @@ export async function extractStreamEndpoint(request: Request, env: Env) {
 
   const extractedUrl = await cachedPlayerUrl(env.DB, cleanedUrl)
     ?? await resolveAndCachePlayerUrl(env.DB, cleanedUrl)
-  return json({ extractedUrl })
+  const embedBlocked = extractedUrl
+    ? await probeEmbedPolicy(extractedUrl, new URL(request.url).origin)
+    : null
+  return json({ extractedUrl, embedBlocked })
 }
 
 interface SearchProviderRow {
