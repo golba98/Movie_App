@@ -975,3 +975,132 @@ describe('watch party API', () => {
     expect(await forbidden).toMatchObject({ code: 'CONTROL_FORBIDDEN' })
   })
 })
+
+describe('watch history sync', () => {
+  const dune = { title: 'Dune: Part Two', overview: 'A story.', posterPath: '/dune.jpg', voteAverage: 8.3 }
+
+  async function sync(cookie: string, body: unknown) {
+    return request('/api/watch-history/sync', { method: 'POST', cookie, origin, body })
+  }
+
+  async function history(cookie: string) {
+    const response = await request('/api/watch-history', { cookie })
+    expect(response.status).toBe(200)
+    return (await response.json()) as {
+      data: {
+        entries: { key: string; watched: boolean; position: number | null; watchSeconds: number; updatedAt: number }[]
+        titles: { mediaType: string; id: number; seasonNumber: number | null; episodeNumber: number | null; item: { title: string } | null; dismissed: boolean; updatedAt: number }[]
+      }
+    }
+  }
+
+  it('round-trips entries and titles so another device sees the same history', async () => {
+    const { viewer } = await activeViewerCookies()
+    const saved = await sync(viewer, {
+      entries: [
+        { key: 'movie:1', watched: false, position: 600, duration: 7_200, watchSeconds: 600, updatedAt: 1_000 },
+        { key: 'tv:2:0:3', watched: true, position: null, duration: null, watchSeconds: 1_500, updatedAt: 2_000 },
+      ],
+      titles: [
+        { mediaType: 'movie', id: 1, seasonNumber: null, episodeNumber: null, item: dune, dismissed: false, updatedAt: 1_000 },
+        { mediaType: 'tv', id: 2, seasonNumber: 0, episodeNumber: 3, item: null, dismissed: false, updatedAt: 2_000 },
+      ],
+    })
+    expect(saved.status).toBe(200)
+
+    const { data } = await history(viewer)
+    expect(data.entries).toEqual([
+      { key: 'tv:2:0:3', watched: true, position: null, duration: null, watchSeconds: 1_500, updatedAt: 2_000 },
+      { key: 'movie:1', watched: false, position: 600, duration: 7_200, watchSeconds: 600, updatedAt: 1_000 },
+    ])
+    expect(data.titles).toEqual([
+      expect.objectContaining({ mediaType: 'tv', id: 2, seasonNumber: 0, episodeNumber: 3, item: null }),
+      expect.objectContaining({ mediaType: 'movie', id: 1, item: expect.objectContaining({ id: 1, mediaType: 'movie', title: 'Dune: Part Two' }) }),
+    ])
+  })
+
+  it('keeps the newest write when an older device syncs stale data', async () => {
+    const { viewer } = await activeViewerCookies()
+    await sync(viewer, {
+      entries: [{ key: 'movie:1', watched: true, watchSeconds: 6_500, updatedAt: 5_000 }],
+      titles: [{ mediaType: 'movie', id: 1, item: dune, dismissed: true, updatedAt: 5_000 }],
+    })
+    await sync(viewer, {
+      entries: [{ key: 'movie:1', watched: false, watchSeconds: 300, updatedAt: 4_000 }],
+      titles: [{ mediaType: 'movie', id: 1, item: null, dismissed: false, updatedAt: 4_000 }],
+    })
+    let { data } = await history(viewer)
+    expect(data.entries[0]).toMatchObject({ watched: true, watchSeconds: 6_500, updatedAt: 5_000 })
+    expect(data.titles[0]).toMatchObject({ dismissed: true, updatedAt: 5_000 })
+
+    // Newer activity brings a dismissed title back and keeps its stored item.
+    await sync(viewer, { titles: [{ mediaType: 'movie', id: 1, item: null, dismissed: false, updatedAt: 6_000 }] })
+    ;({ data } = await history(viewer))
+    expect(data.titles[0]).toMatchObject({ dismissed: false, updatedAt: 6_000, item: expect.objectContaining({ title: 'Dune: Part Two' }) })
+  })
+
+  it('clamps future timestamps to the server clock', async () => {
+    const { viewer } = await activeViewerCookies()
+    const before = Date.now()
+    await sync(viewer, { entries: [{ key: 'movie:1', watched: false, watchSeconds: 400, updatedAt: before + 86_400_000 }] })
+    const { data } = await history(viewer)
+    expect(data.entries[0].updatedAt).toBeLessThanOrEqual(Date.now())
+  })
+
+  it('keeps each account history private', async () => {
+    const admin = await adminCookie()
+    const first = await activeViewerCookie(admin, 'viewer.one', 'Viewer One')
+    const second = await activeViewerCookie(admin, 'viewer.two', 'Viewer Two')
+    await sync(first, { entries: [{ key: 'movie:1', watched: true, updatedAt: 1_000 }] })
+    expect((await history(second)).data.entries).toEqual([])
+    expect((await history(first)).data.entries).toHaveLength(1)
+  })
+
+  it('requires an active session with a changed password', async () => {
+    expect((await request('/api/watch-history')).status).toBe(401)
+    const admin = await adminCookie()
+    await createAccount(admin)
+    const login = await request('/api/auth/login', {
+      method: 'POST',
+      origin,
+      body: { username: 'viewer.one', password: 'temporary-password-123' },
+    })
+    const viewer = cookieFrom(login)
+    expect((await request('/api/watch-history', { cookie: viewer })).status).toBe(403)
+    expect((await sync(viewer, { entries: [] })).status).toBe(403)
+  })
+
+  it('rejects invalid keys, values and oversized batches', async () => {
+    const { viewer } = await activeViewerCookies()
+    for (const body of [
+      { entries: [{ key: 'movie:0', updatedAt: 1 }] },
+      { entries: [{ key: 'tv:1:1', updatedAt: 1 }] },
+      { entries: [{ key: 'person:1', updatedAt: 1 }] },
+      { entries: [{ key: 'movie:1', position: -5, updatedAt: 1 }] },
+      { entries: [{ key: 'movie:1' }] },
+      { titles: [{ mediaType: 'tv', id: 1, seasonNumber: 1, episodeNumber: 0, updatedAt: 1 }] },
+      { entries: Array.from({ length: 201 }, (_, index) => ({ key: `movie:${index + 1}`, updatedAt: 1 })) },
+    ]) {
+      const response = await sync(viewer, body)
+      expect(response.status, JSON.stringify(body).slice(0, 80)).toBe(400)
+    }
+    expect((await history(viewer)).data.entries).toEqual([])
+  })
+
+  it('removes history when the account is deleted', async () => {
+    const { admin, viewer } = await activeViewerCookies()
+    await sync(viewer, {
+      entries: [{ key: 'movie:1', watched: true, updatedAt: 1_000 }],
+      titles: [{ mediaType: 'movie', id: 1, item: dune, updatedAt: 1_000 }],
+    })
+    const accounts = (await (await request('/api/admin/accounts', { cookie: admin })).json()) as {
+      data: { accounts: { id: string }[] }
+    }
+    const deleted = await request(`/api/admin/accounts/${accounts.data.accounts[0].id}`, { method: 'DELETE', cookie: admin, origin })
+    expect(deleted.status).toBe(200)
+    const remaining = await env.DB
+      .prepare('SELECT (SELECT COUNT(*) FROM watch_history) AS entries, (SELECT COUNT(*) FROM watch_titles) AS titles')
+      .first<{ entries: number; titles: number }>()
+    expect(remaining).toEqual({ entries: 0, titles: 0 })
+  })
+})

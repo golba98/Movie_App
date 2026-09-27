@@ -17,7 +17,8 @@ import { getTvSeasonDetails } from '../../api/tmdb'
 import { useTheaterFullscreen } from '../../hooks/useTheaterFullscreen'
 import { useVideoDiagnostics } from '../../hooks/useVideoDiagnostics'
 import { useEmbedProgress } from '../../hooks/useEmbedProgress'
-import { useWatchedHistory, WATCHED_THRESHOLD } from '../../hooks/useWatchedHistory'
+import { usePlaybackWatcher, type WatcherUpdateReason } from '../../hooks/usePlaybackWatcher'
+import { MIN_COUNTED_WATCH_SECONDS, useWatchedHistory, WATCHED_THRESHOLD } from '../../hooks/useWatchedHistory'
 import type { EmbedBlockReason, MediaSource } from '../../types/media-source'
 import type { Episode, MediaItem, MediaType } from '../../types/tmdb'
 import { imageUrl } from '../../utils/images'
@@ -106,6 +107,8 @@ interface StreamingPlayerProps {
   title: string
   media: MediaItem
   numberOfSeasons?: number | null
+  // Movie runtime in minutes; episode runtimes come from the season details.
+  runtime?: number | null
   sources: MediaSource[]
   theaterMode: boolean
   onTheaterModeChange: (open: boolean) => void
@@ -117,6 +120,7 @@ export function StreamingPlayer({
   title,
   media,
   numberOfSeasons,
+  runtime,
   sources,
   theaterMode,
   onTheaterModeChange,
@@ -127,8 +131,8 @@ export function StreamingPlayer({
     isMovieWatched,
     getResumeTarget,
     getProgress,
-    recordPlaybackStart,
-    recordProgress,
+    getEntry,
+    recordWatch,
   } = useWatchedHistory()
 
   const computeStartEpisode = () => {
@@ -239,40 +243,11 @@ export function StreamingPlayer({
     ? savedProgress.position
     : null
 
-  // Starting playback only records activity (for Continue Watching). A title is
-  // marked watched once enough of it has actually played, or manually.
-  const handleStartPlayback = useCallback(() => {
-    recordPlaybackStart(media, progressSeason, progressEpisode)
-  }, [media, progressSeason, progressEpisode, recordPlaybackStart])
-
   const lastProgressSaveRef = useRef(0)
-  const pendingProgressRef = useRef<{
-    season: number | null
-    episode: number | null
-    position: number
-    duration: number
-  } | null>(null)
-
-  const saveProgress = useCallback((position: number, duration: number, force = false) => {
-    if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0) return
-    pendingProgressRef.current = { season: progressSeason, episode: progressEpisode, position, duration }
-    const crossedThreshold = !activeWatched && position / duration >= WATCHED_THRESHOLD
-    const now = Date.now()
-    if (!force && !crossedThreshold && now - lastProgressSaveRef.current < PROGRESS_SAVE_INTERVAL_MS) return
-    lastProgressSaveRef.current = now
-    pendingProgressRef.current = null
-    recordProgress(mediaType, id, progressSeason, progressEpisode, position, duration)
-  }, [activeWatched, id, mediaType, progressEpisode, progressSeason, recordProgress])
-
-  // Flush the last throttled position when the episode changes or the player closes.
-  useEffect(() => () => {
-    const pending = pendingProgressRef.current
-    pendingProgressRef.current = null
-    if (pending) recordProgress(mediaType, id, pending.season, pending.episode, pending.position, pending.duration)
-  }, [id, mediaType, activeSeason, activeEpisode, recordProgress])
-
+  // The latest position reported by the player for the current title, if any.
+  const reportedPositionRef = useRef<{ position: number; duration: number } | null>(null)
+  const lastCommitRef = useRef<{ seconds: number; position?: number }>({ seconds: 0 })
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  useEmbedProgress(iframeRef, ({ position, duration }) => saveProgress(position, duration))
 
   useEffect(() => {
     if (!theaterMode) return
@@ -341,6 +316,65 @@ export function StreamingPlayer({
   const iframeKey = activeSource && activeExtractedUrl ? `${activeSource.id}|${activeExtractedUrl}` : null
   const iframeLoaded = iframeKey !== null && loadedIframeKey === iframeKey
   const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
+
+  // The watcher counts real playback time. A title enters history only after
+  // MIN_COUNTED_WATCH_SECONDS, and is finished once watch time covers
+  // WATCHED_THRESHOLD of its runtime. A player that reports its own position is
+  // trusted over watch time for resuming and finishing.
+  const activeEntry = getEntry(mediaType, id, progressSeason, progressEpisode)
+  const hasEntry = activeEntry !== null
+  const runtimeMinutes = mediaType === 'tv'
+    ? episodes.find((episode) => episode.season_number === activeSeason && episode.episode_number === activeEpisode)?.runtime
+    : runtime
+  const runtimeSeconds = runtimeMinutes && runtimeMinutes > 0 ? runtimeMinutes * 60 : 0
+  const watcherActive = activeSourceIsDynamic ? dynamicPlaybackRequested && iframeLoaded : videoPlaying
+  const watchSessionKey = `${mediaType}:${id}:${progressSeason}:${progressEpisode}`
+
+  const commitWatch = useCallback((watchSeconds: number, urgent = false) => {
+    if (!hasEntry && watchSeconds < MIN_COUNTED_WATCH_SECONDS) return
+    const reported = reportedPositionRef.current
+    const last = lastCommitRef.current
+    if (Math.abs(watchSeconds - last.seconds) < 1 && reported?.position === last.position) return
+    lastCommitRef.current = { seconds: watchSeconds, position: reported?.position }
+    recordWatch({
+      item: media,
+      seasonNumber: progressSeason,
+      episodeNumber: progressEpisode,
+      watchSeconds,
+      position: reported?.position,
+      duration: reported?.duration,
+      finished: !reported && runtimeSeconds > 0 && watchSeconds >= runtimeSeconds * WATCHED_THRESHOLD,
+      urgent,
+    })
+  }, [hasEntry, media, progressEpisode, progressSeason, recordWatch, runtimeSeconds])
+
+  const readWatchSeconds = usePlaybackWatcher({
+    active: watcherActive,
+    sessionKey: watchSessionKey,
+    initialSeconds: activeEntry?.watchSeconds ?? 0,
+    onUpdate: useCallback(
+      (watchSeconds: number, reason: WatcherUpdateReason) => commitWatch(watchSeconds, reason !== 'tick'),
+      [commitWatch],
+    ),
+  })
+
+  // Runs after the watcher has reported the previous title, so nothing leaks across.
+  useEffect(() => {
+    reportedPositionRef.current = null
+    lastCommitRef.current = { seconds: readWatchSeconds() }
+  }, [watchSessionKey, readWatchSeconds])
+
+  const saveProgress = useCallback((position: number, duration: number, mode: 'throttled' | 'now' | 'urgent' = 'throttled') => {
+    if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0) return
+    reportedPositionRef.current = { position, duration }
+    const crossedThreshold = !activeWatched && position / duration >= WATCHED_THRESHOLD
+    const now = Date.now()
+    if (mode === 'throttled' && !crossedThreshold && now - lastProgressSaveRef.current < PROGRESS_SAVE_INTERVAL_MS) return
+    lastProgressSaveRef.current = now
+    commitWatch(readWatchSeconds(), mode === 'urgent')
+  }, [activeWatched, commitWatch, readWatchSeconds])
+
+  useEmbedProgress(iframeRef, ({ position, duration }) => saveProgress(position, duration))
 
   useEffect(() => {
     const previousId = previousActiveSourceIdRef.current
@@ -540,7 +574,6 @@ export function StreamingPlayer({
     const video = videoRef.current
     if (!video) return
     if (video.paused) {
-      handleStartPlayback()
       void video.play().catch(() => {
         setMediaError({
           sourceId: activeSource.id,
@@ -580,7 +613,6 @@ export function StreamingPlayer({
     iframeRevealTimerRef.current = window.setTimeout(() => {
       setLoadedIframeKey(loadedKey)
       iframeRevealTimerRef.current = null
-      handleStartPlayback()
     }, IFRAME_REVEAL_DELAY_MS)
   }
 
@@ -608,12 +640,7 @@ export function StreamingPlayer({
               )}
               <button
                 type="button"
-                onClick={() => {
-                  onTheaterModeChange(true)
-                  if (activeSourceIsDynamic) {
-                    handleStartPlayback()
-                  }
-                }}
+                onClick={() => onTheaterModeChange(true)}
                 className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
                 aria-label="Theater mode"
                 title="Theater mode"
@@ -684,10 +711,7 @@ export function StreamingPlayer({
                     </p>
                     <button
                       type="button"
-                      onClick={() => {
-                        setInlinePlaybackRequested(true)
-                        handleStartPlayback()
-                      }}
+                      onClick={() => setInlinePlaybackRequested(true)}
                       className="mt-4 min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200 sm:mt-5"
                     >
                       Play {mediaType === 'movie' ? 'movie' : 'episode'}
@@ -802,22 +826,19 @@ export function StreamingPlayer({
                     setVideoCurrentTime(video.currentTime)
                     if (!video.paused) saveProgress(video.currentTime, video.duration)
                   }}
-                  onPlay={() => {
-                    setVideoPlaying(true)
-                    handleStartPlayback()
-                  }}
+                  onPlay={() => setVideoPlaying(true)}
                   onPause={(event) => {
                     setVideoPlaying(false)
                     const video = event.currentTarget
-                    if (!video.ended) saveProgress(video.currentTime, video.duration, true)
+                    if (!video.ended) saveProgress(video.currentTime, video.duration, 'urgent')
                   }}
                   onSeeked={(event) => {
                     const video = event.currentTarget
-                    if (video.currentTime > 0) saveProgress(video.currentTime, video.duration, true)
+                    if (video.currentTime > 0) saveProgress(video.currentTime, video.duration, 'now')
                   }}
                   onEnded={(event) => {
                     const video = event.currentTarget
-                    saveProgress(video.duration, video.duration, true)
+                    saveProgress(video.duration, video.duration, 'urgent')
                   }}
                   onVolumeChange={(event) => {
                     setVideoMuted(event.currentTarget.muted)
