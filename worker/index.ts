@@ -3,6 +3,7 @@ import {
   adminLogout,
   adminSession,
   createAccount,
+  deleteAccount,
   listAccounts,
   listAudit,
   resetAccountPassword,
@@ -171,6 +172,7 @@ async function handleApi(request: Request, env: Env) {
   if (accountMatch) {
     return routeMethod(request, {
       PATCH: () => updateAccount(request, env, decodeURIComponent(accountMatch[1])),
+      DELETE: () => deleteAccount(request, env, decodeURIComponent(accountMatch[1])),
     })
   }
   const resetMatch = path.match(/^\/api\/admin\/accounts\/([^/]+)\/reset-password$/)

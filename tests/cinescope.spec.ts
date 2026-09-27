@@ -265,6 +265,13 @@ async function mockTmdb(page: Page) {
     if (path.endsWith('/reset-password')) return route.fulfill({ json: { data: { reset: true } } })
     if (path.endsWith('/revoke-sessions')) return route.fulfill({ json: { data: { revoked: 1 } } })
     if (request.method() === 'PATCH') return route.fulfill({ json: { data: { account: accounts[0] } } })
+    const deleteMatch = path.match(/^\/api\/admin\/accounts\/([^/]+)$/)
+    if (deleteMatch && request.method() === 'DELETE') {
+      const index = accounts.findIndex((account) => account.id === deleteMatch[1])
+      if (index === -1) return route.fulfill({ status: 404, json: { error: { message: 'Account not found.' } } })
+      accounts.splice(index, 1)
+      return route.fulfill({ json: { data: { deleted: true } } })
+    }
     if (path === '/api/admin/search-providers' && request.method() === 'GET') {
       return route.fulfill({ json: { data: { providers: adminSearchProviders } } })
     }
@@ -507,6 +514,25 @@ test('admin can sign in and create a viewer without retaining the password', asy
   await expect(resetPassword).toHaveAttribute('type', 'password')
   await page.getByRole('button', { name: 'Reset', exact: true }).click()
   await expect(page.getByText(/Reset new.viewer's password/)).toBeVisible()
+
+  // Deleting needs the username typed in; cancelling keeps the account.
+  await page.getByRole('button', { name: 'Delete account new.viewer' }).click()
+  const deleteDialog = page.getByRole('dialog', { name: 'Delete new.viewer?' })
+  await expect(deleteDialog).toBeVisible()
+  await deleteDialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(deleteDialog).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'new.viewer' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Delete account new.viewer' }).click()
+  const confirmDelete = deleteDialog.getByRole('button', { name: 'Delete account' })
+  await expect(confirmDelete).toBeDisabled()
+  await deleteDialog.getByLabel('Type new.viewer to confirm').fill('new.viewe')
+  await expect(confirmDelete).toBeDisabled()
+  await deleteDialog.getByLabel('Type new.viewer to confirm').fill('new.viewer')
+  await confirmDelete.click()
+  await expect(deleteDialog).toHaveCount(0)
+  await expect(page.getByText(/Deleted new.viewer/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'new.viewer' })).toHaveCount(0)
 })
 
 test('home and administrator sign-in have no serious accessibility violations', async ({ page }) => {
@@ -1168,4 +1194,34 @@ test('@layout player panels are never clipped and the header sits at the top', a
   for (const name of ['Retry player', 'Stop player']) {
     await expectInside(shell.getByRole('button', { name }), shell)
   }
+})
+
+test('@layout admin delete confirmation fits the screen and stays reachable', async ({ page }) => {
+  await page.goto('/admin')
+  await expect(page.getByRole('heading', { name: 'Administrator' })).toBeVisible()
+  await page.getByLabel('Administrator password', { exact: true }).fill('test-admin-password')
+  await page.getByRole('button', { name: 'Open admin' }).click()
+  await page.getByLabel('Username').fill('layout.viewer')
+  await page.getByLabel('Display name').fill('Layout Viewer')
+  await page.getByLabel('Temporary password', { exact: true }).fill('temporary-password-123')
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page.getByRole('heading', { name: 'layout.viewer' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Delete account layout.viewer' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete layout.viewer?' })
+  await expect(dialog).toBeVisible()
+  const viewport = page.viewportSize()!
+  const box = (await dialog.boundingBox())!
+  expect(box.y).toBeGreaterThanOrEqual(0)
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 0.5)
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 0.5)
+
+  await dialog.getByLabel('Type layout.viewer to confirm').fill('layout.viewer')
+  for (const name of ['Cancel', 'Delete account']) {
+    const button = dialog.getByRole('button', { name })
+    await button.scrollIntoViewIfNeeded()
+    await expectInside(button, dialog)
+  }
+  await dialog.getByRole('button', { name: 'Delete account' }).click()
+  await expect(page.getByRole('heading', { name: 'layout.viewer' })).toHaveCount(0)
 })

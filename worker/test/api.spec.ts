@@ -238,6 +238,54 @@ describe('viewer authentication and account controls', () => {
     expect((await request('/api/auth/session', { cookie: viewer })).status).toBe(401)
   })
 
+  it('deleting an account signs the viewer out, removes their data, and frees the username', async () => {
+    const { admin, viewer } = await activeViewerCookies()
+    const accounts = (await (await request('/api/admin/accounts', { cookie: admin })).json()) as {
+      data: { accounts: { id: string; username: string }[] }
+    }
+    const accountId = accounts.data.accounts[0].id
+    const saved = await request('/api/favourites/movie/1', {
+      method: 'PUT',
+      cookie: viewer,
+      origin,
+      body: {
+        id: 1,
+        mediaType: 'movie',
+        title: 'Dune: Part Two',
+        overview: '',
+        posterPath: null,
+        backdropPath: null,
+        voteAverage: 8.3,
+        date: null,
+        year: null,
+        addedAt: 1_700_000_000_000,
+      },
+    })
+    expect(saved.status).toBe(200)
+
+    expect((await request(`/api/admin/accounts/${accountId}`, { method: 'DELETE', origin })).status).toBe(401)
+    expect(
+      (await request(`/api/admin/accounts/${accountId}`, { method: 'DELETE', cookie: admin, origin: 'https://attacker.test' })).status,
+    ).toBe(403)
+
+    const deleted = await request(`/api/admin/accounts/${accountId}`, { method: 'DELETE', cookie: admin, origin })
+    expect(deleted.status).toBe(200)
+    expect((await request('/api/auth/session', { cookie: viewer })).status).toBe(401)
+    const remaining = await env.DB
+      .prepare('SELECT (SELECT COUNT(*) FROM accounts) AS accounts, (SELECT COUNT(*) FROM favourites) AS favourites, (SELECT COUNT(*) FROM sessions WHERE account_id IS NOT NULL) AS sessions')
+      .first<{ accounts: number; favourites: number; sessions: number }>()
+    expect(remaining).toEqual({ accounts: 0, favourites: 0, sessions: 0 })
+
+    expect((await request(`/api/admin/accounts/${accountId}`, { method: 'DELETE', cookie: admin, origin })).status).toBe(404)
+
+    const audit = (await (await request('/api/admin/audit', { cookie: admin })).json()) as {
+      data: { events: { action: string; targetUsername: string | null }[] }
+    }
+    expect(audit.data.events).toContainEqual(expect.objectContaining({ action: 'account.delete', targetUsername: 'viewer.one' }))
+
+    await createAccount(admin)
+  })
+
   it('password resets revoke sessions and restore the first-login requirement', async () => {
     const admin = await adminCookie()
     const created = await createAccount(admin)
