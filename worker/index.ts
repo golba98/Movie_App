@@ -40,6 +40,7 @@ import {
   watchPartySocket,
   watchPartyState,
 } from './watch-party'
+import { getWatchHistory, syncWatchHistory } from './watch-history'
 export { WatchPartyRoom } from './watch-party-room'
 
 let dbSeeded = false
@@ -236,6 +237,12 @@ async function handleApi(request: Request, env: Env) {
 
   if (path === '/api/favourites') {
     return routeMethod(request, { GET: () => listFavourites(request, env) })
+  }
+  if (path === '/api/watch-history') {
+    return routeMethod(request, {
+      GET: () => getWatchHistory(request, env),
+      POST: () => syncWatchHistory(request, env),
+    })
   }
 
   const mediaSourcesMatch = path.match(/^\/api\/media-sources\/(movie|tv)\/(\d+)$/)

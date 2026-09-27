@@ -14,14 +14,14 @@ interface FavouriteInput {
   addedAt?: unknown
 }
 
-function cleanFavourite(input: FavouriteInput, expectedType?: string, expectedId?: number) {
+// Sanitises the display fields of a MediaItem snapshot; null when the id, type
+// or title is missing.
+export function cleanMediaSnapshot(input: FavouriteInput, expectedType?: string, expectedId?: number) {
   const id = expectedId ?? input.id
   const mediaType = expectedType ?? input.mediaType
-  if (!Number.isInteger(id) || Number(id) <= 0 || (mediaType !== 'movie' && mediaType !== 'tv')) {
-    throw new ApiError(400, 'INVALID_FAVOURITE', 'The favourite item is invalid.')
-  }
+  if (!Number.isInteger(id) || Number(id) <= 0 || (mediaType !== 'movie' && mediaType !== 'tv')) return null
   const title = typeof input.title === 'string' ? input.title.trim().slice(0, 300) : ''
-  if (!title) throw new ApiError(400, 'INVALID_FAVOURITE', 'The favourite title is required.')
+  if (!title) return null
   const nullableString = (value: unknown, max: number) =>
     typeof value === 'string' && value ? value.slice(0, max) : null
   return {
@@ -37,6 +37,19 @@ function cleanFavourite(input: FavouriteInput, expectedType?: string, expectedId
         : 0,
     date: nullableString(input.date, 30),
     year: nullableString(input.year, 10),
+  } as const
+}
+
+function cleanFavourite(input: FavouriteInput, expectedType?: string, expectedId?: number) {
+  const id = expectedId ?? input.id
+  const mediaType = expectedType ?? input.mediaType
+  if (!Number.isInteger(id) || Number(id) <= 0 || (mediaType !== 'movie' && mediaType !== 'tv')) {
+    throw new ApiError(400, 'INVALID_FAVOURITE', 'The favourite item is invalid.')
+  }
+  const snapshot = cleanMediaSnapshot(input, expectedType, expectedId)
+  if (!snapshot) throw new ApiError(400, 'INVALID_FAVOURITE', 'The favourite title is required.')
+  return {
+    ...snapshot,
     addedAt:
       typeof input.addedAt === 'number' && Number.isFinite(input.addedAt)
         ? Math.min(input.addedAt, Date.now())

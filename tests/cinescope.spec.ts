@@ -193,6 +193,9 @@ async function mockTmdb(page: Page) {
     }
     return route.fulfill({ status: 404, json: { error: { message: 'Not found' } } })
   })
+  await page.route('**/api/watch-history', (route) =>
+    route.fulfill({ json: { data: route.request().method() === 'GET' ? { entries: {}, titles: {} } : { synced: 0 } } }),
+  )
   await page.route('**/api/media-sources/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/media-sources/extract') {
@@ -1140,6 +1143,126 @@ test('embedded player progress is saved and Continue Watching resumes playback',
 
   await page.goto('/')
   await expect(page.locator('#continue-watching')).toHaveCount(0)
+})
+
+test('watch history follows the account between devices', async ({ page }) => {
+  const otherDeviceTime = Date.now() - 60_000
+  const posted: { entries: Record<string, unknown>[]; titles: Record<string, unknown>[] }[] = []
+  await page.route('**/api/watch-history', async (route) => {
+    if (route.request().method() === 'POST') {
+      posted.push(route.request().postDataJSON())
+      return route.fulfill({ json: { data: { synced: 1 } } })
+    }
+    return route.fulfill({
+      json: {
+        data: {
+          entries: { 'tv:10:1:1': { watched: true, updatedAt: otherDeviceTime } },
+          titles: { 'tv:10': { mediaType: 'tv', id: 10, seasonNumber: 1, episodeNumber: 2, updatedAt: otherDeviceTime } },
+        },
+      },
+    })
+  })
+
+  // Progress made on another device shows up here.
+  await page.goto('/')
+  const continueRow = page.locator('#continue-watching')
+  await expect(continueRow.locator('article', { hasText: 'The Expanse' }).getByText('S1 E2')).toBeVisible()
+  await page.goto('/tv/10')
+  await expect(page.getByRole('button', { name: 'Resume S1 E2' })).toBeVisible()
+  // Nothing changed on this device, so nothing is sent back.
+  await page.waitForTimeout(2_500)
+  expect(posted).toHaveLength(0)
+
+  // Changes made here are sent to the server for the other devices.
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Mark as watched' }).click()
+  await expect.poll(() => posted.flatMap((body) => body.entries)).toContainEqual(
+    expect.objectContaining({ key: 'movie:1', watched: true }),
+  )
+
+  await page.goto('/')
+  await continueRow.getByRole('button', { name: 'Remove The Expanse from Continue Watching' }).click()
+  await expect(continueRow).toHaveCount(0)
+  await expect.poll(() => posted.flatMap((body) => body.titles)).toContainEqual(
+    expect.objectContaining({ key: 'tv:10', mediaType: 'tv', id: 10, removed: true }),
+  )
+})
+
+test('history saved on this device before sync is uploaded after sign-in', async ({ page }) => {
+  const posted: { entries: Record<string, unknown>[] }[] = []
+  await page.route('**/api/watch-history', async (route) => {
+    if (route.request().method() === 'POST') {
+      posted.push(route.request().postDataJSON())
+      return route.fulfill({ json: { data: { synced: 1 } } })
+    }
+    return route.fulfill({ json: { data: { entries: {}, titles: {} } } })
+  })
+  await page.addInitScript(() => {
+    if (localStorage.getItem('seeded')) return
+    localStorage.setItem('seeded', '1')
+    localStorage.setItem('fedora-movies:watched-history:v2', JSON.stringify({
+      entries: { 'movie:1': { watched: true, updatedAt: 1_700_000_000_000 } },
+      titles: {},
+    }))
+  })
+  await page.goto('/')
+  await expect.poll(() => posted.flatMap((body) => body.entries)).toContainEqual(
+    expect.objectContaining({ key: 'movie:1', watched: true, updatedAt: 1_700_000_000_000 }),
+  )
+  // The cache now belongs to the signed-in account.
+  expect(await page.evaluate(() => localStorage.getItem('fedora-movies:watched-history:v2'))).toBeNull()
+  expect(await page.evaluate(() => localStorage.getItem('fedora-movies:watched-history:v2:viewer-test-id'))).toContain('movie:1')
+})
+
+test('a stuck embedded player can be reloaded without leaving the page', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const embedUrl = 'https://player.example.test/embed/movie/1'
+  let playerLoads = 0
+  await page.route('**/api/media-sources/movie/1', async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          sources: [{
+            id: 'flixbaba-default',
+            mediaType: 'movie',
+            tmdbId: 1,
+            seasonNumber: null,
+            episodeNumber: null,
+            label: 'Flixbaba Stream (Dynamic)',
+            sourceUrl: 'https://flixbaba.mov/movie/1/dune-part-two/watch',
+            mimeType: 'video/mp4',
+            rightsBasis: 'licensed',
+            isDynamic: true,
+          }],
+        },
+      },
+    })
+  })
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    await route.fulfill({ json: { data: { extractedUrl: embedUrl } } })
+  })
+  await page.route('https://player.example.test/**', async (route) => {
+    playerLoads += 1
+    await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Test player</title>' })
+  })
+
+  await page.goto('/movie/1')
+  await expect(page.getByRole('button', { name: 'Reload player' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  const player = page.locator('#streaming-player')
+  await expect(player.getByRole('status')).toHaveCount(0)
+  expect(playerLoads).toBe(1)
+
+  await player.getByRole('button', { name: 'Reload player' }).click()
+  await expect.poll(() => playerLoads).toBe(2)
+  await expect(player.locator('iframe')).toHaveCount(1)
+  await expect(player.getByRole('status')).toHaveCount(0)
+
+  await player.getByRole('button', { name: 'Theater mode' }).click()
+  await player.getByRole('button', { name: 'Reload player' }).click()
+  await expect.poll(() => playerLoads).toBe(3)
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+  await expect(player.getByRole('status')).toHaveCount(0)
 })
 
 async function expectInside(inner: Locator, outer: Locator) {
