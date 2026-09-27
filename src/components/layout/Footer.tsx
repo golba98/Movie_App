@@ -3,7 +3,7 @@ import { BrandMark } from './BrandMark'
 
 export function Footer() {
   return (
-    <footer className="border-t border-[#262626] bg-[#070709]/40 backdrop-blur-md">
+    <footer className="border-t border-[#262626] bg-[#070709]/40">
       <div className="mx-auto max-w-7xl px-6 py-12 lg:px-8">
         <div className="grid grid-cols-1 gap-8 border-b border-[#262626] pb-8 md:grid-cols-4">
           <div className="space-y-4 md:col-span-2">

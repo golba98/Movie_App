@@ -1296,3 +1296,21 @@ test('@layout a vertical swipe that starts on a poster row scrolls the page', as
 })
 
 
+
+// Backdrop blur behind always-visible bars and the details popup is re-filtered on every scroll
+// frame and caused dropped frames while scrolling; these surfaces must stay unblurred.
+test('@layout sticky bars and the details popup backdrop avoid per-frame blur', async ({ page }) => {
+  await page.goto('/movie/1')
+  await expect(page.getByRole('button', { name: 'Watch Movie' })).toBeVisible()
+  const blurs = await page.evaluate(() => {
+    const surfaces = [
+      ...document.querySelectorAll('header, nav[aria-label="Mobile navigation"]'),
+      ...document.querySelectorAll('.fixed.inset-0 > .absolute.inset-0'),
+    ]
+    return surfaces
+      .filter((element) => (element as HTMLElement).offsetParent !== null || getComputedStyle(element).position === 'fixed')
+      .map((element) => getComputedStyle(element).backdropFilter)
+  })
+  expect(blurs.length).toBeGreaterThan(1)
+  expect(blurs.every((value) => value === 'none')).toBe(true)
+})

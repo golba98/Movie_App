@@ -16,7 +16,7 @@ export function MobileHeader() {
   const { account, logout } = useAuth()
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/8 bg-black/75 backdrop-blur-2xl md:hidden">
+    <header className="sticky top-0 z-40 border-b border-white/8 bg-black/90 md:hidden">
       <div className="flex min-h-14 items-center justify-between gap-3 px-4 pt-safe">
         <Logo />
         <div className="flex items-center gap-1">
@@ -30,7 +30,7 @@ export function MobileHeader() {
 
 export function MobileNavigation() {
   return (
-    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black/80 px-2 pb-safe backdrop-blur-2xl md:hidden">
+    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black/90 px-2 pb-safe md:hidden">
       <div className="mx-auto grid max-w-lg grid-cols-5">
         {links.map(({ to, label, end, icon: Icon }) => (
           <NavLink

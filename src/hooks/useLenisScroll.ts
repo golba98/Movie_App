@@ -11,26 +11,18 @@ export function useLenisScroll() {
       return
     }
 
+    // lerp follows the wheel closely instead of gliding on a fixed 1s+ easing
+    // curve. Touch stays native (syncTouch is off), which is smoothest on phones.
     const lenis = new Lenis({
-      duration: 1.1,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      lerp: 0.12,
       orientation: 'vertical',
       gestureOrientation: 'vertical',
       smoothWheel: true,
       wheelMultiplier: 1,
-      touchMultiplier: 1.5,
+      autoRaf: true,
     })
 
     lenisRef.current = lenis
-
-    let rafId: number
-
-    const raf = (time: number) => {
-      lenis.raf(time)
-      rafId = requestAnimationFrame(raf)
-    }
-
-    rafId = requestAnimationFrame(raf)
 
     // Watch document.body for overflow changes (e.g. modals locking scroll)
     const observer = new MutationObserver(() => {
@@ -48,7 +40,6 @@ export function useLenisScroll() {
 
     return () => {
       observer.disconnect()
-      cancelAnimationFrame(rafId)
       lenis.destroy()
       lenisRef.current = null
     }

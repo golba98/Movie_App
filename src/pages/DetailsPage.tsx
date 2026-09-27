@@ -18,7 +18,7 @@ import { useWatchedHistory } from '../hooks/useWatchedHistory'
 import type { MediaSource } from '../types/media-source'
 import type { MediaItem, MediaType, MovieDetails, TvDetails } from '../types/tmdb'
 import { watchPartyEnabled } from '../utils/featureFlags'
-import { backdropUrl } from '../utils/images'
+import { backdropSrcSet, backdropUrl } from '../utils/images'
 import {
   chooseTrailer,
   detailsToMediaItem,
@@ -185,7 +185,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
     <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-0 sm:p-6 md:p-10 short:p-0">
       {/* Backdrop overlay */}
       <div
-        className={`absolute inset-0 bg-zinc-950/80 backdrop-blur-md transition-opacity duration-200 ease-out ${
+        className={`absolute inset-0 bg-zinc-950/90 transition-opacity duration-200 ease-out ${
           isMounted && !isClosing ? 'opacity-100' : 'opacity-0'
         }`}
         onClick={handleClose}
@@ -240,6 +240,8 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                   {backdrop && !backdropError && (
                     <img
                       src={backdrop}
+                      srcSet={backdropSrcSet(item.backdropPath)}
+                      sizes="(min-width: 1024px) 1152px, 100vw"
                       alt=""
                       role="presentation"
                       className={`absolute inset-0 -z-20 size-full object-cover transition-opacity duration-300 ease-out ${
