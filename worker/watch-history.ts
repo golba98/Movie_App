@@ -40,6 +40,7 @@ function cleanEntry(input: unknown) {
     watched: input.watched === true,
     position: cleanSeconds(input.position),
     duration: cleanSeconds(input.duration),
+    watchSeconds: cleanSeconds(input.watchSeconds) ?? 0,
     updatedAt: cleanUpdatedAt(input.updatedAt),
   }
 }
@@ -66,9 +67,16 @@ export async function getWatchHistory(request: Request, env: Env) {
   const session = await requireUser(request, env.DB)
   const [entryRows, titleRows] = await Promise.all([
     env.DB
-      .prepare('SELECT entry_key, watched, position, duration, updated_at FROM watch_entries WHERE account_id = ?')
+      .prepare('SELECT entry_key, watched, position, duration, watch_seconds, updated_at FROM watch_entries WHERE account_id = ?')
       .bind(session.account.id)
-      .all<{ entry_key: string; watched: number; position: number | null; duration: number | null; updated_at: number }>(),
+      .all<{
+        entry_key: string
+        watched: number
+        position: number | null
+        duration: number | null
+        watch_seconds: number
+        updated_at: number
+      }>(),
     env.DB
       .prepare(
         `SELECT media_type, media_id, season_number, episode_number, item_json, removed, updated_at
@@ -93,6 +101,7 @@ export async function getWatchHistory(request: Request, env: Env) {
       updatedAt: row.updated_at,
       ...(row.position !== null ? { position: row.position } : {}),
       ...(row.duration !== null ? { duration: row.duration } : {}),
+      ...(row.watch_seconds > 0 ? { watchSeconds: row.watch_seconds } : {}),
     }
   }
 
@@ -137,16 +146,17 @@ export async function syncWatchHistory(request: Request, env: Env) {
     ...entries.map((entry) =>
       env.DB
         .prepare(
-          `INSERT INTO watch_entries (account_id, entry_key, watched, position, duration, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO watch_entries (account_id, entry_key, watched, position, duration, watch_seconds, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(account_id, entry_key) DO UPDATE SET
              watched = excluded.watched,
              position = excluded.position,
              duration = excluded.duration,
+             watch_seconds = excluded.watch_seconds,
              updated_at = excluded.updated_at
            WHERE excluded.updated_at > watch_entries.updated_at`,
         )
-        .bind(accountId, entry.key, entry.watched ? 1 : 0, entry.position, entry.duration, entry.updatedAt),
+        .bind(accountId, entry.key, entry.watched ? 1 : 0, entry.position, entry.duration, entry.watchSeconds, entry.updatedAt),
     ),
     ...titles.map((title) =>
       env.DB

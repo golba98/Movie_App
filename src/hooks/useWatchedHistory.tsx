@@ -18,12 +18,16 @@ const MAX_KEEPALIVE_ITEMS = 100
 
 // A title counts as finished once this share of it has played.
 export const WATCHED_THRESHOLD = 0.9
+// Playback shorter than this never enters history, so accidental plays don't count.
+export const MIN_COUNTED_WATCH_SECONDS = 300
 
 export interface WatchedItem {
   watched: boolean
   updatedAt: number
   position?: number
   duration?: number
+  // Real playback time, counted by the player's watcher.
+  watchSeconds?: number
 }
 
 // The most recent activity for a whole title; drives Continue Watching.
@@ -48,6 +52,19 @@ export interface PlaybackProgress {
   duration: number
 }
 
+export interface WatchRecord {
+  item: MediaItem
+  seasonNumber: number | null
+  episodeNumber: number | null
+  watchSeconds: number
+  position?: number | null
+  duration?: number | null
+  // The watcher saw enough playback time to call the title finished.
+  finished?: boolean
+  // Send to the account now, e.g. the player is stopping or the page is hidden.
+  urgent?: boolean
+}
+
 interface WatchedHistoryContextValue {
   history: Record<string, WatchedItem>
   continueWatching: TitleProgress[]
@@ -60,15 +77,8 @@ interface WatchedHistoryContextValue {
   getResumeTarget: (showId: number) => EpisodeRef | null
   getTitleProgress: (mediaType: MediaType, id: number) => TitleProgress | null
   getProgress: (mediaType: MediaType, id: number, seasonNumber?: number | null, episodeNumber?: number | null) => PlaybackProgress | null
-  recordPlaybackStart: (item: MediaItem, seasonNumber?: number | null, episodeNumber?: number | null) => void
-  recordProgress: (
-    mediaType: MediaType,
-    id: number,
-    seasonNumber: number | null,
-    episodeNumber: number | null,
-    position: number,
-    duration: number,
-  ) => void
+  getEntry: (mediaType: MediaType, id: number, seasonNumber?: number | null, episodeNumber?: number | null) => WatchedItem | null
+  recordWatch: (record: WatchRecord) => void
   removeFromContinueWatching: (mediaType: MediaType, id: number) => void
   backfillTitle: (item: MediaItem) => void
 }
@@ -230,6 +240,8 @@ export function WatchedHistoryProvider({ children }: { children: React.ReactNode
   const pushTimerRef = useRef<number | null>(null)
   const lastPushRef = useRef(0)
   const lastPullRef = useRef(0)
+  // Set when a change should reach the server without waiting for the batch.
+  const urgentPushRef = useRef(false)
   // Bumped after each pull and push so the scheduling effect re-checks for
   // changes that are still unsent.
   const [syncTick, setSyncTick] = useState(0)
@@ -310,8 +322,16 @@ export function WatchedHistoryProvider({ children }: { children: React.ReactNode
   useEffect(() => {
     if (!accountId || !pulledRef.current) return
     const changes = pendingChanges(state, syncedRef.current, 1)
-    if (changes.entries.length || changes.titles.length) schedulePush()
-  }, [accountId, state, syncTick, schedulePush])
+    if (!changes.entries.length && !changes.titles.length) return
+    if (urgentPushRef.current) {
+      urgentPushRef.current = false
+      if (pushTimerRef.current !== null) window.clearTimeout(pushTimerRef.current)
+      pushTimerRef.current = null
+      void push(true).then(() => setSyncTick((tick) => tick + 1))
+      return
+    }
+    schedulePush()
+  }, [accountId, state, syncTick, push, schedulePush])
 
   // Pick up changes from other devices when the app comes back into view, and
   // send ours before the page is hidden or closed.
@@ -350,7 +370,7 @@ export function WatchedHistoryProvider({ children }: { children: React.ReactNode
             watched: nextWatched,
             updatedAt: Date.now(),
             // Unmarking restarts the title rather than resuming at the credits.
-            ...(nextWatched ? {} : { position: undefined }),
+            ...(nextWatched ? {} : { position: undefined, watchSeconds: 0 }),
           },
         },
       }
@@ -376,7 +396,7 @@ export function WatchedHistoryProvider({ children }: { children: React.ReactNode
             ...current.entries[key],
             watched: nextWatched,
             updatedAt: now,
-            ...(nextWatched ? {} : { position: undefined }),
+            ...(nextWatched ? {} : { position: undefined, watchSeconds: 0 }),
           },
         }
         if (!nextWatched) return { ...current, entries }
@@ -446,64 +466,49 @@ export function WatchedHistoryProvider({ children }: { children: React.ReactNode
     [history],
   )
 
-  const recordPlaybackStart = useCallback(
-    (item: MediaItem, seasonNumber: number | null = null, episodeNumber: number | null = null) => {
-      const now = Date.now()
-      const key = entryKey(item.mediaType, item.id, seasonNumber, episodeNumber)
-      setState((current) => ({
-        entries: {
-          ...current.entries,
-          [key]: { ...current.entries[key], watched: Boolean(current.entries[key]?.watched), updatedAt: now },
-        },
-        titles: {
-          ...current.titles,
-          [titleKey(item.mediaType, item.id)]: {
-            mediaType: item.mediaType,
-            id: item.id,
-            item,
-            seasonNumber: item.mediaType === 'tv' ? seasonNumber : null,
-            episodeNumber: item.mediaType === 'tv' ? episodeNumber : null,
-            updatedAt: now,
-          },
-        },
-      }))
-    },
-    [],
+  const getEntry = useCallback(
+    (mediaType: MediaType, id: number, seasonNumber?: number | null, episodeNumber?: number | null) =>
+      history[entryKey(mediaType, id, seasonNumber, episodeNumber)] ?? null,
+    [history],
   )
 
-  const recordProgress = useCallback(
-    (
-      mediaType: MediaType,
-      id: number,
-      seasonNumber: number | null,
-      episodeNumber: number | null,
-      position: number,
-      duration: number,
-    ) => {
-      if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0 || position < 0) return
+  // Called by the player's watcher once a title has played for
+  // MIN_COUNTED_WATCH_SECONDS, then as playback continues.
+  const recordWatch = useCallback(
+    ({ item, seasonNumber, episodeNumber, watchSeconds, position, duration, finished, urgent }: WatchRecord) => {
+      const { mediaType, id } = item
+      const season = mediaType === 'tv' ? seasonNumber : null
+      const episode = mediaType === 'tv' ? episodeNumber : null
+      const key = entryKey(mediaType, id, season, episode)
+      const hasPosition = position != null && duration != null
+        && Number.isFinite(position) && Number.isFinite(duration) && position >= 0 && duration > 0
+      const reachedEnd = Boolean(finished) || (hasPosition && position / duration >= WATCHED_THRESHOLD)
+      // Becoming watched is sent straight away, like a manual mark.
+      if (urgent || (reachedEnd && !stateRef.current.entries[key]?.watched)) urgentPushRef.current = true
       const now = Date.now()
-      const key = entryKey(mediaType, id, seasonNumber, episodeNumber)
       setState((current) => {
         const previous = current.entries[key]
-        const title = current.titles[titleKey(mediaType, id)]
+        const watched = Boolean(previous?.watched) || reachedEnd
         return {
           entries: {
             ...current.entries,
             [key]: {
-              watched: Boolean(previous?.watched) || position / duration >= WATCHED_THRESHOLD,
+              watched,
               updatedAt: now,
-              position,
-              duration,
+              position: hasPosition ? position : previous?.position,
+              duration: hasPosition ? duration : previous?.duration,
+              watchSeconds: Number.isFinite(watchSeconds) ? Math.max(0, watchSeconds) : previous?.watchSeconds,
             },
           },
           titles: {
             ...current.titles,
             [titleKey(mediaType, id)]: {
-              ...withoutRemoval(title),
+              ...withoutRemoval(current.titles[titleKey(mediaType, id)]),
               mediaType,
               id,
-              seasonNumber: mediaType === 'tv' ? seasonNumber : null,
-              episodeNumber: mediaType === 'tv' ? episodeNumber : null,
+              item,
+              seasonNumber: season,
+              episodeNumber: episode,
               updatedAt: now,
             },
           },
@@ -553,8 +558,8 @@ export function WatchedHistoryProvider({ children }: { children: React.ReactNode
       getResumeTarget,
       getTitleProgress,
       getProgress,
-      recordPlaybackStart,
-      recordProgress,
+      getEntry,
+      recordWatch,
       removeFromContinueWatching,
       backfillTitle,
     }),
@@ -570,8 +575,8 @@ export function WatchedHistoryProvider({ children }: { children: React.ReactNode
       getResumeTarget,
       getTitleProgress,
       getProgress,
-      recordPlaybackStart,
-      recordProgress,
+      getEntry,
+      recordWatch,
       removeFromContinueWatching,
       backfillTitle,
     ],

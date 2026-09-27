@@ -129,8 +129,34 @@ const authorisedMediaSources = [
   },
 ]
 
+interface SyncedEntry {
+  watched: boolean
+  position?: number
+  duration?: number
+  watchSeconds?: number
+  updatedAt: number
+}
+
+interface SyncedTitle {
+  mediaType: 'movie' | 'tv'
+  id: number
+  seasonNumber: number | null
+  episodeNumber: number | null
+  item?: Record<string, unknown>
+  removed?: boolean
+  updatedAt: number
+}
+
+// Stands in for the account's history on the server, shared by every device.
+let watchServer = {
+  entries: new Map<string, SyncedEntry>(),
+  titles: new Map<string, SyncedTitle>(),
+  syncs: [] as { entries: ({ key: string } & SyncedEntry)[]; titles: ({ key: string } & SyncedTitle)[] }[],
+}
+
 async function mockTmdb(page: Page) {
   let favourites: Record<string, unknown>[] = []
+  watchServer = { entries: new Map(), titles: new Map(), syncs: [] }
   let adminAuthenticated = false
   const accounts: Record<string, unknown>[] = []
   let adminMediaSources: Record<string, unknown>[] = []
@@ -193,9 +219,28 @@ async function mockTmdb(page: Page) {
     }
     return route.fulfill({ status: 404, json: { error: { message: 'Not found' } } })
   })
-  await page.route('**/api/watch-history', (route) =>
-    route.fulfill({ json: { data: route.request().method() === 'GET' ? { entries: {}, titles: {} } : { synced: 0 } } }),
-  )
+  await page.route('**/api/watch-history', async (route) => {
+    const request = route.request()
+    if (request.method() === 'GET') {
+      return route.fulfill({
+        json: { data: { entries: Object.fromEntries(watchServer.entries), titles: Object.fromEntries(watchServer.titles) } },
+      })
+    }
+    const body = request.postDataJSON() as {
+      entries: ({ key: string } & SyncedEntry)[]
+      titles: ({ key: string } & SyncedTitle)[]
+    }
+    watchServer.syncs.push(body)
+    for (const { key, ...entry } of body.entries) {
+      const current = watchServer.entries.get(key)
+      if (!current || entry.updatedAt > current.updatedAt) watchServer.entries.set(key, entry)
+    }
+    for (const { key, ...title } of body.titles) {
+      const current = watchServer.titles.get(key)
+      if (!current || title.updatedAt > current.updatedAt) watchServer.titles.set(key, { ...title, item: title.item ?? current?.item })
+    }
+    return route.fulfill({ json: { data: { synced: body.entries.length + body.titles.length } } })
+  })
   await page.route('**/api/media-sources/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/media-sources/extract') {
@@ -1019,7 +1064,7 @@ test('an extractor error on one source does not break the other source', async (
   await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
 })
 
-test('starting playback never marks a title watched, but adds it to Continue Watching', async ({ page }) => {
+test('starting playback neither marks a title watched nor lists it, and manual marks sync to the account', async ({ page }) => {
   await page.goto('/tv/10')
   await page.getByRole('button', { name: 'Watch Show' }).click()
   await page.getByRole('button', { name: 'Exit theater mode' }).click()
@@ -1029,9 +1074,12 @@ test('starting playback never marks a title watched, but adds it to Continue Wat
   await player.getByRole('button', { name: 'Play video' }).click()
   await expect(player.getByText('0 / 2 watched')).toBeVisible()
 
-  // Manual marking still works and moves the resume point past the episode.
+  // Manual marking still works, moves the resume point past the episode, and
+  // reaches the account straight away so other devices see it.
   const episodeCard = player.locator('div').filter({ has: page.getByRole('button', { name: 'Dulcinea' }) }).last()
+  const synced = page.waitForRequest((request) => request.url().endsWith('/api/watch-history') && request.method() === 'POST')
   await episodeCard.getByRole('button', { name: 'Mark as watched' }).click()
+  expect((await synced).postDataJSON().entries).toContainEqual(expect.objectContaining({ key: 'tv:10:1:1', watched: true }))
   await expect(player.getByText('1 / 2 watched')).toBeVisible()
   await expect(episodeCard.getByRole('button', { name: 'Mark as unwatched' })).toBeVisible()
 
@@ -1045,20 +1093,18 @@ test('starting playback never marks a title watched, but adds it to Continue Wat
 
   await page.goto('/')
   const continueRow = page.locator('#continue-watching')
-  await expect(continueRow.getByRole('heading', { name: 'Continue watching' })).toBeVisible()
-  const duneCard = continueRow.locator('article', { hasText: 'Dune: Part Two' })
-  await expect(duneCard).toBeVisible()
-  await expect(duneCard.getByText('Watched')).toHaveCount(0)
   await expect(continueRow.locator('article', { hasText: 'The Expanse' }).getByText('S1 E1')).toBeVisible()
+  await expect(continueRow.locator('article', { hasText: 'Dune: Part Two' })).toHaveCount(0)
+  expect(watchServer.entries.has('movie:1')).toBe(false)
 
   await page.goto('/movie/1')
-  await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Resume' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Mark as watched' }).click()
   await expect(page.getByRole('button', { name: 'Watched' })).toHaveAttribute('aria-pressed', 'true')
 
   await page.goto('/')
-  await expect(continueRow.locator('article', { hasText: 'Dune: Part Two' })).toHaveCount(0)
   await expect(page.locator('article', { hasText: 'Dune: Part Two' }).first().getByText('Watched')).toBeVisible()
+  await expect.poll(() => watchServer.entries.get('movie:1')?.watched).toBe(true)
 })
 
 test('history from the old format is kept as in progress and can be removed from Continue Watching', async ({ page }) => {
@@ -1126,9 +1172,12 @@ test('embedded player progress is saved and Continue Watching resumes playback',
     })
   })
 
+  await page.clock.install()
   await page.goto('/movie/1')
   await page.getByRole('button', { name: 'Play movie' }).click()
   await expect(page.locator('#streaming-player iframe')).toHaveAttribute('src', embedUrl)
+  await expect(page.locator('#streaming-player iframe')).toHaveClass(/opacity-100/)
+  await watchFor(page, 5 * 60_000 + 15_000)
   await expect(page.getByRole('button', { name: 'Resume from 5:00' })).toBeVisible()
 
   await page.goto('/')
@@ -1143,6 +1192,112 @@ test('embedded player progress is saved and Continue Watching resumes playback',
 
   await page.goto('/')
   await expect(page.locator('#continue-watching')).toHaveCount(0)
+})
+
+// Advances a fake clock one watcher tick at a time, so each tick sees real elapsed time.
+async function watchFor(page: Page, ms: number) {
+  for (let elapsed = 0; elapsed < ms; elapsed += 15_000) await page.clock.fastForward(Math.min(15_000, ms - elapsed))
+}
+
+async function setPageVisibility(page: Page, state: 'visible' | 'hidden') {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value })
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => value === 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }, state)
+}
+
+async function useSilentDynamicMovie(page: Page, runtimeMinutes: number) {
+  const embedUrl = 'https://player.example.test/embed/movie/1'
+  await page.route('**/api/media-sources/movie/1', (route) => route.fulfill({
+    json: {
+      data: {
+        sources: [{
+          id: 'flixbaba-default',
+          mediaType: 'movie',
+          tmdbId: 1,
+          seasonNumber: null,
+          episodeNumber: null,
+          label: 'Flixbaba Stream (Dynamic)',
+          sourceUrl: 'https://flixbaba.mov/movie/1/dune-part-two/watch',
+          mimeType: 'video/mp4',
+          rightsBasis: 'licensed',
+          isDynamic: true,
+        }],
+      },
+    },
+  }))
+  await page.route('**/api/media-sources/extract**', (route) => route.fulfill({ json: { data: { extractedUrl: embedUrl } } }))
+  // Like most providers, this player never reports its position.
+  await page.route('https://player.example.test/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Silent player</title>' }))
+  await page.route(
+    (url) => url.pathname === '/api/tmdb/movie/1',
+    (route) => route.fulfill({ json: { ...movie, runtime: runtimeMinutes, ...detailsExtras } }),
+  )
+}
+
+test('a title counts only after five minutes of visible playback and is watched once most of its runtime has played', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await useSilentDynamicMovie(page, 10)
+  await page.clock.install()
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  const iframe = page.locator('#streaming-player iframe')
+  await expect(iframe).toHaveClass(/opacity-100/)
+
+  // Time while the page is hidden is not watch time.
+  await setPageVisibility(page, 'hidden')
+  await watchFor(page, 10 * 60_000)
+  await setPageVisibility(page, 'visible')
+  await watchFor(page, 4 * 60_000)
+  expect(watchServer.entries.has('movie:1')).toBe(false)
+  expect(watchServer.syncs).toEqual([])
+
+  await watchFor(page, 75_000)
+  await expect.poll(() => watchServer.entries.get('movie:1')?.watchSeconds ?? 0).toBeGreaterThanOrEqual(300)
+  expect(watchServer.entries.get('movie:1')?.watched).toBe(false)
+  expect(watchServer.titles.get('movie:1')).toMatchObject({ item: expect.objectContaining({ title: 'Dune: Part Two' }) })
+  expect(watchServer.titles.get('movie:1')).not.toHaveProperty('removed')
+
+  await page.goto('/')
+  await expect(page.locator('#continue-watching').locator('article', { hasText: 'Dune: Part Two' })).toBeVisible()
+
+  // Watch time carries over: 90% of the 10-minute runtime is reached after four more minutes.
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await watchFor(page, 3 * 60_000)
+  await expect(page.getByRole('button', { name: 'Mark as watched' })).toBeVisible()
+  await watchFor(page, 60_000)
+  await expect(page.getByRole('button', { name: 'Watched', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => watchServer.entries.get('movie:1')?.watched).toBe(true)
+})
+
+test('history recorded on another device shows here and refreshes when the app regains focus', async ({ page }) => {
+  await page.clock.install()
+  const now = Date.now()
+  watchServer.entries.set('tv:10:1:1', { watched: true, watchSeconds: 1_500, updatedAt: now })
+  watchServer.titles.set('tv:10', {
+    mediaType: 'tv',
+    id: 10,
+    seasonNumber: 1,
+    episodeNumber: 1,
+    item: { id: 10, mediaType: 'tv', title: 'The Expanse', overview: '', posterPath: '/expanse.jpg', backdropPath: null, voteAverage: 8.1, date: null, year: null },
+    updatedAt: now,
+  })
+
+  await page.goto('/')
+  await expect(page.locator('#continue-watching').locator('article', { hasText: 'The Expanse' })).toBeVisible()
+  await page.goto('/tv/10')
+  await expect(page.getByRole('button', { name: 'Watch S1 E2' })).toBeVisible()
+
+  await page.goto('/movie/1')
+  await expect(page.getByRole('button', { name: 'Mark as watched' })).toBeVisible()
+  watchServer.entries.set('movie:1', { watched: true, watchSeconds: 9_000, updatedAt: Date.now() + 1 })
+  await page.clock.fastForward(31_000)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByRole('button', { name: 'Watched' })).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('watch history follows the account between devices', async ({ page }) => {

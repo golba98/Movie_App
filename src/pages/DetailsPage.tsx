@@ -371,6 +371,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                       title={item.title}
                       media={item}
                       numberOfSeasons={tv?.number_of_seasons}
+                      runtime={movie?.runtime}
                       sources={mediaSources}
                       theaterMode={theaterMode}
                       onTheaterModeChange={setTheaterMode}

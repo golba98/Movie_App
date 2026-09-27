@@ -465,6 +465,19 @@ describe('watch history sync', () => {
     expect(Number(history.entries['movie:5'].updatedAt)).toBeLessThanOrEqual(Date.now())
   })
 
+  it('stores watch time with each entry, newest update winning', async () => {
+    const { viewer } = await activeViewerCookies()
+    await sync(viewer, { entries: [{ key: 'movie:1', watched: false, watchSeconds: 320.5, updatedAt: 1_000 }] })
+    await sync(viewer, { entries: [{ key: 'movie:1', watched: false, watchSeconds: 30, updatedAt: 500 }] })
+    let history = await readHistory(viewer)
+    expect(history.entries['movie:1']).toEqual({ watched: false, watchSeconds: 320.5, updatedAt: 1_000 })
+
+    await sync(viewer, { entries: [{ key: 'movie:1', watched: true, watchSeconds: 5_400, updatedAt: 2_000 }] })
+    history = await readHistory(viewer)
+    expect(history.entries['movie:1']).toEqual({ watched: true, watchSeconds: 5_400, updatedAt: 2_000 })
+    expect((await sync(viewer, { entries: [{ key: 'movie:1', watchSeconds: -1, updatedAt: 3_000 }] })).status).toBe(400)
+  })
+
   it('rejects malformed items and oversized syncs', async () => {
     const { viewer } = await activeViewerCookies()
     const bad = [

@@ -133,6 +133,8 @@ export interface Episode {
   season_number: number
   still_path?: string | null
   air_date?: string | null
+  // Minutes.
+  runtime?: number | null
 }
 
 export interface TvSeasonDetails {
