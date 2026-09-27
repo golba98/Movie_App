@@ -151,6 +151,10 @@ npm run deploy
 
 Migration `0004_stream_resolution_cache.sql` creates the shared cache table required for the resolver-performance improvement.
 
+Migration `0007_watch_history.sql` creates the per-account watch history tables behind `/api/watch-history`. Each browser keeps a localStorage cache per account and syncs it with the server, newest update winning, so watched flags, resume positions and Continue Watching follow the viewer across devices. It must be applied before deploying the Worker that serves that route.
+
+Migration `0008_watch_time.sql` adds the real playback time the player's watcher counts per movie or episode. A title enters history after 5 minutes of it and is marked watched once it covers 90% of the runtime. Apply it before deploying the Worker that reads and writes `watchSeconds`.
+
 ## Limits of the protection model
 
 Fedora Movies can enforce account access, keep privileged credentials server-side, record administrative changes, isolate optional external players from the app shell, and reduce duplicated resolver work. These controls reduce the application attack surface and improve reliability.

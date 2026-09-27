@@ -48,7 +48,9 @@ async function mock(page: Page, detailsDelayMs = 400) {
     }),
   )
   await page.route('**/api/favourites**', (route) => route.fulfill({ json: { data: { favourites: [] } } }))
-  await page.route('**/api/watch-history**', (route) => route.fulfill({ json: { data: { entries: [], titles: [] } } }))
+  await page.route('**/api/watch-history', (route) =>
+    route.fulfill({ json: { data: route.request().method() === 'GET' ? { entries: {}, titles: {} } : { synced: 0 } } }),
+  )
   await page.route('**/api/media-sources/**', (route) => route.fulfill({ json: { data: { sources: [] } } }))
   await page.route('https://image.tmdb.org/**', (route) =>
     route.fulfill({

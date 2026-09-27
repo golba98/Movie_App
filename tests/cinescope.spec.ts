@@ -130,11 +130,10 @@ const authorisedMediaSources = [
 ]
 
 interface SyncedEntry {
-  key: string
   watched: boolean
-  position: number | null
-  duration: number | null
-  watchSeconds: number
+  position?: number
+  duration?: number
+  watchSeconds?: number
   updatedAt: number
 }
 
@@ -143,8 +142,8 @@ interface SyncedTitle {
   id: number
   seasonNumber: number | null
   episodeNumber: number | null
-  item: Record<string, unknown> | null
-  dismissed: boolean
+  item?: Record<string, unknown>
+  removed?: boolean
   updatedAt: number
 }
 
@@ -152,7 +151,7 @@ interface SyncedTitle {
 let watchServer = {
   entries: new Map<string, SyncedEntry>(),
   titles: new Map<string, SyncedTitle>(),
-  syncs: [] as { entries: SyncedEntry[]; titles: SyncedTitle[] }[],
+  syncs: [] as { entries: ({ key: string } & SyncedEntry)[]; titles: ({ key: string } & SyncedTitle)[] }[],
 }
 
 async function mockTmdb(page: Page) {
@@ -220,31 +219,27 @@ async function mockTmdb(page: Page) {
     }
     return route.fulfill({ status: 404, json: { error: { message: 'Not found' } } })
   })
-  await page.route('**/api/watch-history**', async (route) => {
+  await page.route('**/api/watch-history', async (route) => {
     const request = route.request()
-    const path = new URL(request.url()).pathname
-    if (path === '/api/watch-history' && request.method() === 'GET') {
+    if (request.method() === 'GET') {
       return route.fulfill({
-        json: { data: { entries: [...watchServer.entries.values()], titles: [...watchServer.titles.values()] } },
+        json: { data: { entries: Object.fromEntries(watchServer.entries), titles: Object.fromEntries(watchServer.titles) } },
       })
     }
-    if (path === '/api/watch-history/sync' && request.method() === 'POST') {
-      const body = request.postDataJSON() as { entries: SyncedEntry[]; titles: SyncedTitle[] }
-      watchServer.syncs.push(body)
-      for (const entry of body.entries) {
-        const current = watchServer.entries.get(entry.key)
-        if (!current || entry.updatedAt >= current.updatedAt) watchServer.entries.set(entry.key, entry)
-      }
-      for (const title of body.titles) {
-        const key = `${title.mediaType}:${title.id}`
-        const current = watchServer.titles.get(key)
-        if (!current || title.updatedAt >= current.updatedAt) {
-          watchServer.titles.set(key, { ...title, item: title.item ?? current?.item ?? null })
-        }
-      }
-      return route.fulfill({ json: { data: { synced: body.entries.length + body.titles.length } } })
+    const body = request.postDataJSON() as {
+      entries: ({ key: string } & SyncedEntry)[]
+      titles: ({ key: string } & SyncedTitle)[]
     }
-    return route.fulfill({ status: 404, json: { error: { message: 'Not found' } } })
+    watchServer.syncs.push(body)
+    for (const { key, ...entry } of body.entries) {
+      const current = watchServer.entries.get(key)
+      if (!current || entry.updatedAt > current.updatedAt) watchServer.entries.set(key, entry)
+    }
+    for (const { key, ...title } of body.titles) {
+      const current = watchServer.titles.get(key)
+      if (!current || title.updatedAt > current.updatedAt) watchServer.titles.set(key, { ...title, item: title.item ?? current?.item })
+    }
+    return route.fulfill({ json: { data: { synced: body.entries.length + body.titles.length } } })
   })
   await page.route('**/api/media-sources/**', async (route) => {
     const path = new URL(route.request().url()).pathname
@@ -1069,7 +1064,7 @@ test('an extractor error on one source does not break the other source', async (
   await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
 })
 
-test('starting playback neither marks a title watched nor lists it, and manual marks sync at once', async ({ page }) => {
+test('starting playback neither marks a title watched nor lists it, and manual marks sync to the account', async ({ page }) => {
   await page.goto('/tv/10')
   await page.getByRole('button', { name: 'Watch Show' }).click()
   await page.getByRole('button', { name: 'Exit theater mode' }).click()
@@ -1082,7 +1077,7 @@ test('starting playback neither marks a title watched nor lists it, and manual m
   // Manual marking still works, moves the resume point past the episode, and
   // reaches the account straight away so other devices see it.
   const episodeCard = player.locator('div').filter({ has: page.getByRole('button', { name: 'Dulcinea' }) }).last()
-  const synced = page.waitForRequest((request) => request.url().endsWith('/api/watch-history/sync'))
+  const synced = page.waitForRequest((request) => request.url().endsWith('/api/watch-history') && request.method() === 'POST')
   await episodeCard.getByRole('button', { name: 'Mark as watched' }).click()
   expect((await synced).postDataJSON().entries).toContainEqual(expect.objectContaining({ key: 'tv:10:1:1', watched: true }))
   await expect(player.getByText('1 / 2 watched')).toBeVisible()
@@ -1262,7 +1257,8 @@ test('a title counts only after five minutes of visible playback and is watched 
   await watchFor(page, 75_000)
   await expect.poll(() => watchServer.entries.get('movie:1')?.watchSeconds ?? 0).toBeGreaterThanOrEqual(300)
   expect(watchServer.entries.get('movie:1')?.watched).toBe(false)
-  expect(watchServer.titles.get('movie:1')).toMatchObject({ dismissed: false, item: expect.objectContaining({ title: 'Dune: Part Two' }) })
+  expect(watchServer.titles.get('movie:1')).toMatchObject({ item: expect.objectContaining({ title: 'Dune: Part Two' }) })
+  expect(watchServer.titles.get('movie:1')).not.toHaveProperty('removed')
 
   await page.goto('/')
   await expect(page.locator('#continue-watching').locator('article', { hasText: 'Dune: Part Two' })).toBeVisible()
@@ -1281,14 +1277,13 @@ test('a title counts only after five minutes of visible playback and is watched 
 test('history recorded on another device shows here and refreshes when the app regains focus', async ({ page }) => {
   await page.clock.install()
   const now = Date.now()
-  watchServer.entries.set('tv:10:1:1', { key: 'tv:10:1:1', watched: true, position: null, duration: null, watchSeconds: 1_500, updatedAt: now })
+  watchServer.entries.set('tv:10:1:1', { watched: true, watchSeconds: 1_500, updatedAt: now })
   watchServer.titles.set('tv:10', {
     mediaType: 'tv',
     id: 10,
     seasonNumber: 1,
     episodeNumber: 1,
     item: { id: 10, mediaType: 'tv', title: 'The Expanse', overview: '', posterPath: '/expanse.jpg', backdropPath: null, voteAverage: 8.1, date: null, year: null },
-    dismissed: false,
     updatedAt: now,
   })
 
@@ -1299,10 +1294,130 @@ test('history recorded on another device shows here and refreshes when the app r
 
   await page.goto('/movie/1')
   await expect(page.getByRole('button', { name: 'Mark as watched' })).toBeVisible()
-  watchServer.entries.set('movie:1', { key: 'movie:1', watched: true, position: null, duration: null, watchSeconds: 9_000, updatedAt: Date.now() + 1 })
+  watchServer.entries.set('movie:1', { watched: true, watchSeconds: 9_000, updatedAt: Date.now() + 1 })
   await page.clock.fastForward(31_000)
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(page.getByRole('button', { name: 'Watched' })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('watch history follows the account between devices', async ({ page }) => {
+  const otherDeviceTime = Date.now() - 60_000
+  const posted: { entries: Record<string, unknown>[]; titles: Record<string, unknown>[] }[] = []
+  await page.route('**/api/watch-history', async (route) => {
+    if (route.request().method() === 'POST') {
+      posted.push(route.request().postDataJSON())
+      return route.fulfill({ json: { data: { synced: 1 } } })
+    }
+    return route.fulfill({
+      json: {
+        data: {
+          entries: { 'tv:10:1:1': { watched: true, updatedAt: otherDeviceTime } },
+          titles: { 'tv:10': { mediaType: 'tv', id: 10, seasonNumber: 1, episodeNumber: 2, updatedAt: otherDeviceTime } },
+        },
+      },
+    })
+  })
+
+  // Progress made on another device shows up here.
+  await page.goto('/')
+  const continueRow = page.locator('#continue-watching')
+  await expect(continueRow.locator('article', { hasText: 'The Expanse' }).getByText('S1 E2')).toBeVisible()
+  await page.goto('/tv/10')
+  await expect(page.getByRole('button', { name: 'Resume S1 E2' })).toBeVisible()
+  // Nothing changed on this device, so nothing is sent back.
+  await page.waitForTimeout(2_500)
+  expect(posted).toHaveLength(0)
+
+  // Changes made here are sent to the server for the other devices.
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Mark as watched' }).click()
+  await expect.poll(() => posted.flatMap((body) => body.entries)).toContainEqual(
+    expect.objectContaining({ key: 'movie:1', watched: true }),
+  )
+
+  await page.goto('/')
+  await continueRow.getByRole('button', { name: 'Remove The Expanse from Continue Watching' }).click()
+  await expect(continueRow).toHaveCount(0)
+  await expect.poll(() => posted.flatMap((body) => body.titles)).toContainEqual(
+    expect.objectContaining({ key: 'tv:10', mediaType: 'tv', id: 10, removed: true }),
+  )
+})
+
+test('history saved on this device before sync is uploaded after sign-in', async ({ page }) => {
+  const posted: { entries: Record<string, unknown>[] }[] = []
+  await page.route('**/api/watch-history', async (route) => {
+    if (route.request().method() === 'POST') {
+      posted.push(route.request().postDataJSON())
+      return route.fulfill({ json: { data: { synced: 1 } } })
+    }
+    return route.fulfill({ json: { data: { entries: {}, titles: {} } } })
+  })
+  await page.addInitScript(() => {
+    if (localStorage.getItem('seeded')) return
+    localStorage.setItem('seeded', '1')
+    localStorage.setItem('fedora-movies:watched-history:v2', JSON.stringify({
+      entries: { 'movie:1': { watched: true, updatedAt: 1_700_000_000_000 } },
+      titles: {},
+    }))
+  })
+  await page.goto('/')
+  await expect.poll(() => posted.flatMap((body) => body.entries)).toContainEqual(
+    expect.objectContaining({ key: 'movie:1', watched: true, updatedAt: 1_700_000_000_000 }),
+  )
+  // The cache now belongs to the signed-in account.
+  expect(await page.evaluate(() => localStorage.getItem('fedora-movies:watched-history:v2'))).toBeNull()
+  expect(await page.evaluate(() => localStorage.getItem('fedora-movies:watched-history:v2:viewer-test-id'))).toContain('movie:1')
+})
+
+test('a stuck embedded player can be reloaded without leaving the page', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const embedUrl = 'https://player.example.test/embed/movie/1'
+  let playerLoads = 0
+  await page.route('**/api/media-sources/movie/1', async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          sources: [{
+            id: 'flixbaba-default',
+            mediaType: 'movie',
+            tmdbId: 1,
+            seasonNumber: null,
+            episodeNumber: null,
+            label: 'Flixbaba Stream (Dynamic)',
+            sourceUrl: 'https://flixbaba.mov/movie/1/dune-part-two/watch',
+            mimeType: 'video/mp4',
+            rightsBasis: 'licensed',
+            isDynamic: true,
+          }],
+        },
+      },
+    })
+  })
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    await route.fulfill({ json: { data: { extractedUrl: embedUrl } } })
+  })
+  await page.route('https://player.example.test/**', async (route) => {
+    playerLoads += 1
+    await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Test player</title>' })
+  })
+
+  await page.goto('/movie/1')
+  await expect(page.getByRole('button', { name: 'Reload player' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  const player = page.locator('#streaming-player')
+  await expect(player.getByRole('status')).toHaveCount(0)
+  expect(playerLoads).toBe(1)
+
+  await player.getByRole('button', { name: 'Reload player' }).click()
+  await expect.poll(() => playerLoads).toBe(2)
+  await expect(player.locator('iframe')).toHaveCount(1)
+  await expect(player.getByRole('status')).toHaveCount(0)
+
+  await player.getByRole('button', { name: 'Theater mode' }).click()
+  await player.getByRole('button', { name: 'Reload player' }).click()
+  await expect.poll(() => playerLoads).toBe(3)
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+  await expect(player.getByRole('status')).toHaveCount(0)
 })
 
 async function expectInside(inner: Locator, outer: Locator) {
