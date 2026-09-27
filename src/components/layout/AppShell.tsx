@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { Footer } from './Footer'
 import { Header } from './Header'
 import { LegacyImportBanner } from '../auth/LegacyImportBanner'
-import { MobileNavigation } from './MobileNavigation'
+import { MobileHeader, MobileNavigation } from './MobileNavigation'
 import { useLenisScroll } from '../../hooks/useLenisScroll'
 
 export function AppShell() {
@@ -25,6 +25,7 @@ export function AppShell() {
   return (
     <div className="relative z-10 flex min-h-dvh min-w-0 flex-col overflow-x-hidden bg-transparent">
       <Header />
+      <MobileHeader />
       <LegacyImportBanner />
       <main className="min-w-0 flex-1 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-0">
         <Outlet />

@@ -21,18 +21,28 @@ export default defineConfig({
     },
     {
       name: 'android-chromium',
-      grep: /@mobile/,
+      grep: /@mobile|@layout/,
       use: { ...devices['Pixel 5'] },
     },
     {
       name: 'iphone-chromium',
-      grep: /@mobile/,
+      grep: /@mobile|@layout/,
       use: { ...devices['iPhone 13'], browserName: 'chromium' },
     },
     {
       name: 'ipad-chromium',
-      grep: /@mobile/,
+      grep: /@mobile|@layout/,
       use: { ...devices['iPad Pro 11'], browserName: 'chromium' },
+    },
+    {
+      name: 'iphone-landscape-chromium',
+      grep: /@layout/,
+      use: { ...devices['iPhone 13 landscape'], browserName: 'chromium' },
+    },
+    {
+      name: 'ipad-landscape-chromium',
+      grep: /@layout/,
+      use: { ...devices['iPad Pro 11 landscape'], browserName: 'chromium' },
     },
   ],
   webServer: {
