@@ -1225,3 +1225,74 @@ test('@layout admin delete confirmation fits the screen and stays reachable', as
   await dialog.getByRole('button', { name: 'Delete account' }).click()
   await expect(page.getByRole('heading', { name: 'layout.viewer' })).toHaveCount(0)
 })
+
+async function homeWithFullTrendingRow(page: Page) {
+  const many = Array.from({ length: 14 }, (_, index) => ({ ...movie, id: 500 + index, title: `Trending ${index + 1}` }))
+  await page.route('**/api/tmdb/trending/movie/week*', async (route) => {
+    await route.fulfill({ json: paginated(many) })
+  })
+  await page.goto('/')
+  const row = page.getByRole('region', { name: 'Trending movies' })
+  await expect(row.getByRole('link', { name: 'View details for Trending 14' })).toBeAttached()
+  // The horizontal scroller is the element wrapping each card's snap container.
+  const scroller = row.locator('article').first().locator('xpath=../..')
+  return { row, scroller }
+}
+
+const pageScrollY = (page: Page) => page.evaluate(() => window.scrollY)
+
+// Smooth scrolling keeps gliding briefly; wait until the page position stops changing.
+async function settledScrollY(page: Page) {
+  let previous = -1
+  let current = await pageScrollY(page)
+  while (current !== previous) {
+    previous = current
+    await page.waitForTimeout(250)
+    current = await pageScrollY(page)
+  }
+  return current
+}
+
+test('wheel scrolling over a poster row keeps scrolling the page instead of stalling', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const { scroller } = await homeWithFullTrendingRow(page)
+  const box = (await scroller.boundingBox())!
+  // Park the cursor on the row, then scroll down with the wheel.
+  await page.mouse.move(box.x + box.width / 2, Math.min(box.y + box.height / 2, 600))
+  const before = await pageScrollY(page)
+  for (let tick = 0; tick < 5; tick += 1) {
+    await page.mouse.wheel(0, 120)
+    await page.waitForTimeout(40)
+  }
+  await expect.poll(() => pageScrollY(page), { timeout: 4_000 }).toBeGreaterThan(before + 300)
+
+  // Sideways gestures still belong to the row.
+  await settledScrollY(page)
+  await scroller.scrollIntoViewIfNeeded()
+  const settledY = await settledScrollY(page)
+  const rowBox = (await scroller.boundingBox())!
+  await page.mouse.move(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2)
+  await page.mouse.wheel(400, 0)
+  await expect.poll(() => scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  expect(Math.abs((await pageScrollY(page)) - settledY)).toBeLessThan(2)
+})
+
+test('@layout a vertical swipe that starts on a poster row scrolls the page', async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== 'chromium' || !testInfo.project.use.hasTouch, 'Needs Chromium touch emulation')
+  const { scroller } = await homeWithFullTrendingRow(page)
+  await scroller.scrollIntoViewIfNeeded()
+  const before = await settledScrollY(page)
+  const box = (await scroller.boundingBox())!
+  const x = Math.round(box.x + box.width / 2)
+  const y = Math.round(Math.min(box.y + box.height / 2, page.viewportSize()!.height - 40))
+  const client = await page.context().newCDPSession(page)
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+  for (let step = 1; step <= 12; step += 1) {
+    await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - step * 20 }] })
+    await page.waitForTimeout(16)
+  }
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await expect.poll(() => pageScrollY(page)).toBeGreaterThan(before + 150)
+})
+
+

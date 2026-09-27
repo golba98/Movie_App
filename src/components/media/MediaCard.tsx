@@ -42,7 +42,7 @@ export function MediaCard({
         >
           <span className="sr-only">{linkLabel}</span>
         </Link>
-        <PosterImage path={item.posterPath} title={item.title} />
+        <PosterImage path={item.posterPath} title={item.title} size="w342" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/80 to-transparent" />
         {continueCard && (
           <button

@@ -1,9 +1,17 @@
 import { Film } from 'lucide-react'
 import { useState, useEffect } from 'react'
-import { posterUrl } from '../../utils/images'
+import { imageUrl } from '../../utils/images'
 
-export function PosterImage({ path, title }: { path: string | null; title: string }) {
-  const source = posterUrl(path)
+export function PosterImage({
+  path,
+  title,
+  size = 'w500',
+}: {
+  path: string | null
+  title: string
+  size?: Parameters<typeof imageUrl>[1]
+}) {
+  const source = imageUrl(path, size)
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const failed = source === failedSource

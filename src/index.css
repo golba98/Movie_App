@@ -196,9 +196,23 @@ textarea {
   background: rgb(113 113 122 / 70%);
 }
 
+/* Placeholder heights match rendered rows at each breakpoint, so rows that
+   render mid-scroll don't change the page height. */
 .media-row-container {
   content-visibility: auto;
-  contain-intrinsic-size: auto 340px;
+  contain-intrinsic-size: auto 344px;
+}
+
+@media (min-width: 40rem) {
+  .media-row-container {
+    contain-intrinsic-size: auto 378px;
+  }
+}
+
+@media (min-width: 64rem) {
+  .media-row-container {
+    contain-intrinsic-size: auto 402px;
+  }
 }
 
 /* Lenis smooth scrolling rules */
