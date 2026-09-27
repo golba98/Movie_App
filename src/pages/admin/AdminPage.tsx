@@ -372,7 +372,7 @@ export function AdminPage() {
 
   return (
     <div className="min-h-dvh bg-[#070709] pb-safe">
-      <header className="sticky top-0 z-30 border-b border-white/8 bg-black/75 backdrop-blur-2xl">
+      <header className="sticky top-0 z-30 border-b border-white/8 bg-black/90">
         <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-4 px-4 py-2 sm:px-6 lg:px-8">
           <div className="flex items-center gap-4"><Logo /><span className="hidden rounded-full bg-white/8 px-3 py-1 text-xs text-zinc-300 sm:inline">Admin console</span></div>
           <div className="flex items-center gap-2">

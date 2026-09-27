@@ -1,7 +1,7 @@
 import { Info, Play, Star } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
 import type { MediaItem, Video } from '../../types/tmdb'
-import { backdropUrl } from '../../utils/images'
+import { backdropSrcSet, backdropUrl } from '../../utils/images'
 import { formatRating, mediaPath } from '../../utils/media'
 
 export function Hero({
@@ -24,6 +24,8 @@ export function Hero({
       {backdrop ? (
         <img
           src={backdrop}
+          srcSet={backdropSrcSet(item.backdropPath)}
+          sizes="100vw"
           alt=""
           role="presentation"
           fetchPriority="high"
@@ -37,7 +39,7 @@ export function Hero({
 
       <div className="mx-auto w-full max-w-7xl px-4 pb-9 sm:px-6 sm:pb-12 lg:px-8 lg:pb-16">
         <div className="max-w-2xl">
-          <span className="inline-flex rounded-full border border-white/20 bg-black/30 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-brand-400 backdrop-blur-sm">
+          <span className="inline-flex rounded-full border border-white/20 bg-black/55 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-brand-400">
             Featured this week
           </span>
           <h1 id="featured-title" className="mt-4 text-3xl font-black leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
@@ -67,7 +69,7 @@ export function Hero({
               <button
                 type="button"
                 onClick={onWatchTrailer}
-                className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 bg-black/45 px-5 font-black text-white backdrop-blur-md transition hover:bg-black/65"
+                className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 bg-black/60 px-5 font-black text-white transition hover:bg-black/75"
               >
                 <Play size={19} fill="currentColor" aria-hidden="true" />
                 Watch trailer

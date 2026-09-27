@@ -9,5 +9,8 @@ export function imageUrl(
 
 export const posterUrl = (path: string | null | undefined) => imageUrl(path, 'w500')
 export const backdropUrl = (path: string | null | undefined) => imageUrl(path, 'w1280')
+// Lets phones pick the 780px backdrop instead of always decoding the 1280px one.
+export const backdropSrcSet = (path: string | null | undefined) =>
+  path ? `${imageUrl(path, 'w780')} 780w, ${imageUrl(path, 'w1280')} 1280w` : undefined
 export const profileUrl = (path: string | null | undefined) => imageUrl(path, 'w185')
 export const providerLogoUrl = (path: string | null | undefined) => imageUrl(path, 'w185')

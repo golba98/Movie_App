@@ -15,7 +15,7 @@ export function Header() {
   const { account, logout } = useAuth()
 
   return (
-    <header className="sticky top-0 z-40 hidden border-b border-white/8 bg-black/70 backdrop-blur-2xl md:block">
+    <header className="sticky top-0 z-40 hidden border-b border-white/8 bg-black/90 md:block">
       <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-5 px-6 lg:px-8">
         <Logo />
         <nav aria-label="Main navigation" className="flex items-center gap-6">
