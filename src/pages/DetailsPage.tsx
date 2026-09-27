@@ -182,7 +182,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
     : null
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-0 sm:p-6 md:p-10">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-0 sm:p-6 md:p-10 short:p-0">
       {/* Backdrop overlay */}
       <div
         className={`absolute inset-0 bg-zinc-950/80 backdrop-blur-md transition-opacity duration-200 ease-out ${
@@ -199,7 +199,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
           lingers for the duration while animating out to `none`. */}
       <div
         data-lenis-prevent
-        className={`scrollbar-hidden relative z-10 w-full max-w-5xl h-full max-h-none sm:max-h-[85vh] overflow-y-auto rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/10 bg-zinc-950 shadow-2xl ease-out ${
+        className={`scrollbar-hidden relative z-10 w-full max-w-5xl lg:max-w-6xl h-full max-h-none sm:max-h-[85vh] overflow-y-auto rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/10 short:max-h-none short:max-w-none short:rounded-none short:border-0 bg-zinc-950 shadow-2xl ease-out ${
           theaterMode
             ? 'opacity-100 transition-none'
             : `transition-all duration-200 ${
@@ -232,7 +232,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
           {/* Loaded details content */}
           {isDataReady && data && item && (
             <article className="min-w-0 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:pb-20">
-                <header className="relative isolate min-h-[260px] overflow-hidden sm:min-h-[390px] lg:min-h-[470px]">
+                <header className="relative isolate min-h-[260px] overflow-hidden sm:min-h-[390px] lg:min-h-[470px] short:min-h-[220px]">
                   {/* Gradient fill sits behind the backdrop as the reserved
                       fallback: it shows before the image decodes and stays if the
                       image fails, so the fixed-height header never goes blank. */}
@@ -284,16 +284,16 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                         </p>
                       )}
 
-                      <div className="mt-7 flex flex-wrap justify-start gap-3">
+                      <div className="mt-7 flex flex-wrap justify-start gap-2 sm:gap-3">
                         {mediaSources === null ? (
-                          <span role="status" className="inline-flex min-h-12 items-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-400">
+                          <span role="status" className="inline-flex min-h-12 basis-full items-center justify-center rounded-xl sm:basis-auto border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-400">
                             Checking authorised playback…
                           </span>
                         ) : mediaSources.length > 0 ? (
                           <button
                             type="button"
                             onClick={() => setTheaterMode(true)}
-                            className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-brand-400 px-5 font-black text-zinc-950 transition hover:bg-brand-500"
+                            className="inline-flex min-h-12 basis-full items-center justify-center gap-2 rounded-xl sm:basis-auto bg-brand-400 px-5 font-black text-zinc-950 transition hover:bg-brand-500"
                           >
                             <Play size={18} fill="currentColor" aria-hidden="true" />
                             {mediaType === 'movie'
@@ -309,7 +309,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                           <button
                             type="button"
                             onClick={() => setWatchPartyOpen(true)}
-                            className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 bg-white/7 px-5 font-black text-white transition hover:bg-white/12"
+                            className="inline-flex min-h-12 grow items-center justify-center gap-2 sm:grow-0 rounded-xl border border-white/15 bg-white/7 px-5 font-black text-white transition hover:bg-white/12"
                           >
                             <Users size={18} aria-hidden="true" />Watch with friends
                           </button>
@@ -318,7 +318,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                           <button
                             type="button"
                             onClick={() => setTrailerOpen(true)}
-                            className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 bg-white/7 px-5 font-black text-white transition hover:bg-white/12"
+                            className="inline-flex min-h-12 grow items-center justify-center gap-2 sm:grow-0 rounded-xl border border-white/15 bg-white/7 px-5 font-black text-white transition hover:bg-white/12"
                           >
                             <Play size={18} fill="currentColor" aria-hidden="true" />Watch trailer
                           </button>
@@ -328,7 +328,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                             type="button"
                             onClick={() => toggleMovieWatched(id)}
                             aria-pressed={movieWatched}
-                            className={`inline-flex min-h-12 items-center gap-2 rounded-xl border px-5 font-black transition ${movieWatched ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200' : 'border-white/15 bg-white/7 text-white hover:bg-white/12'}`}
+                            className={`inline-flex min-h-12 grow items-center justify-center gap-2 sm:grow-0 rounded-xl border px-5 font-black transition ${movieWatched ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200' : 'border-white/15 bg-white/7 text-white hover:bg-white/12'}`}
                           >
                             <Check size={18} aria-hidden="true" />
                             {movieWatched ? 'Watched' : 'Mark as watched'}
@@ -338,7 +338,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                           type="button"
                           onClick={() => toggleFavourite(item)}
                           aria-pressed={favourite}
-                          className={`inline-flex min-h-12 items-center gap-2 rounded-xl border px-5 font-black transition ${favourite ? 'border-brand-400/50 bg-brand-600 text-white' : 'border-white/15 bg-white/7 text-white hover:bg-white/12'}`}
+                          className={`inline-flex min-h-12 grow items-center justify-center gap-2 sm:grow-0 rounded-xl border px-5 font-black transition ${favourite ? 'border-brand-400/50 bg-brand-600 text-white' : 'border-white/15 bg-white/7 text-white hover:bg-white/12'}`}
                         >
                           <Heart size={18} fill={favourite ? 'currentColor' : 'none'} aria-hidden="true" />
                           {favourite ? 'Remove favourite' : 'Add to favourites'}
@@ -417,7 +417,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
               }`}
             >
               <div className="min-w-0 pb-14 sm:pb-20 animate-pulse motion-reduce:animate-none">
-                <header className="relative min-h-[260px] overflow-hidden sm:min-h-[390px] lg:min-h-[470px] bg-zinc-900/50">
+                <header className="relative min-h-[260px] overflow-hidden sm:min-h-[390px] lg:min-h-[470px] short:min-h-[220px] bg-zinc-900/50">
                   <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-black/20" />
                 </header>
 

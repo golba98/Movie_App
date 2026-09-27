@@ -119,7 +119,7 @@ export function SearchPage() {
               <h2 className="text-xl font-black">Results for “{debouncedQuery}”</h2>
               <span className="text-sm text-zinc-500">Movies and TV shows</span>
             </div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-5 lg:grid-cols-5 xl:grid-cols-6">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {items.map((item) => <MediaCard key={`${item.mediaType}-${item.id}`} item={item} />)}
             </div>
             {error && <div className="mt-8"><ErrorMessage message={error} compact /></div>}

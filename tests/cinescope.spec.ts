@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
 
 const movie = {
   id: 1,
@@ -1114,4 +1114,58 @@ test('embedded player progress is saved and Continue Watching resumes playback',
 
   await page.goto('/')
   await expect(page.locator('#continue-watching')).toHaveCount(0)
+})
+
+async function expectInside(inner: Locator, outer: Locator) {
+  const [innerBox, outerBox] = await Promise.all([inner.boundingBox(), outer.boundingBox()])
+  expect(innerBox).not.toBeNull()
+  expect(outerBox).not.toBeNull()
+  expect(innerBox!.x).toBeGreaterThanOrEqual(outerBox!.x - 0.5)
+  expect(innerBox!.y).toBeGreaterThanOrEqual(outerBox!.y - 0.5)
+  expect(innerBox!.x + innerBox!.width).toBeLessThanOrEqual(outerBox!.x + outerBox!.width + 0.5)
+  expect(innerBox!.y + innerBox!.height).toBeLessThanOrEqual(outerBox!.y + outerBox!.height + 0.5)
+}
+
+test('@layout player panels are never clipped and the header sits at the top', async ({ page }) => {
+  await page.route('**/api/media-sources/movie/1', async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          sources: ['flixbaba', 'soap2day'].map((provider) => ({
+            id: provider,
+            mediaType: 'movie',
+            tmdbId: 1,
+            seasonNumber: null,
+            episodeNumber: null,
+            label: `${provider} Stream (Dynamic)`,
+            sourceUrl: `https://${provider}.example.test/movie/1`,
+            mimeType: 'video/mp4',
+            rightsBasis: 'licensed',
+            isDynamic: true,
+          })),
+        },
+      },
+    })
+  })
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    await route.fulfill({ json: { data: { extractedUrl: null } } })
+  })
+
+  await page.goto('/')
+  const signOut = page.getByRole('button', { name: 'Sign out' }).filter({ visible: true })
+  await expect(signOut).toHaveCount(1)
+  expect((await signOut.boundingBox())!.y).toBeLessThan(80)
+
+  await page.goto('/movie/1')
+  const shell = page.getByTestId('player-shell')
+  await shell.scrollIntoViewIfNeeded()
+  await expectInside(page.getByRole('heading', { name: 'Ready when you are' }), shell)
+  await expectInside(page.getByRole('button', { name: 'Play movie' }), shell)
+
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  await expect(page.getByRole('heading', { name: 'Player unavailable' })).toBeVisible()
+  await shell.scrollIntoViewIfNeeded()
+  for (const name of ['Retry player', 'Stop player']) {
+    await expectInside(shell.getByRole('button', { name }), shell)
+  }
 })
