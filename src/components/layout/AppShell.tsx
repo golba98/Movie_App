@@ -2,7 +2,7 @@ import { Outlet, useLocation, useNavigationType } from 'react-router'
 import { useEffect } from 'react'
 import { Footer } from './Footer'
 import { Header } from './Header'
-import { LegacyImportBanner } from '../auth/LegacyImportBanner'
+import { LegacyImportBanner } from '../../features/favourites/LegacyImportBanner'
 import { MobileHeader, MobileNavigation } from './MobileNavigation'
 import { useLenisScroll } from '../../hooks/useLenisScroll'
 

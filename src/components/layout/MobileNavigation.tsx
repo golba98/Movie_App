@@ -1,6 +1,6 @@
 import { Film, Heart, Home, LogOut, Search, Tv } from 'lucide-react'
 import { NavLink } from 'react-router'
-import { useAuth } from '../../hooks/useAuth'
+import { useAuth } from '../../features/auth/AuthProvider'
 import { Logo } from './Logo'
 
 const links = [
