@@ -7,6 +7,7 @@ import {
   getTrendingMovies,
   getUpcomingMovies,
 } from '../api/tmdb'
+import { ContinueWatchingRow } from '../components/media/ContinueWatchingRow'
 import { Hero } from '../components/media/Hero'
 import { MediaRow } from '../components/media/MediaRow'
 import { TrailerModal } from '../components/media/TrailerModal'
@@ -54,6 +55,7 @@ export function HomePage() {
       )}
 
       <div className="space-y-10 pb-14 sm:space-y-12 sm:pb-20">
+        <ContinueWatchingRow />
         <MediaRow
           title="Trending movies"
           items={trendingItems}

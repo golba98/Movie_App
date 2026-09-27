@@ -16,10 +16,12 @@ import { apiRequest } from '../../api/client'
 import { getTvSeasonDetails } from '../../api/tmdb'
 import { useTheaterFullscreen } from '../../hooks/useTheaterFullscreen'
 import { useVideoDiagnostics } from '../../hooks/useVideoDiagnostics'
-import { useWatchedHistory } from '../../hooks/useWatchedHistory'
+import { useEmbedProgress } from '../../hooks/useEmbedProgress'
+import { useWatchedHistory, WATCHED_THRESHOLD } from '../../hooks/useWatchedHistory'
 import type { EmbedBlockReason, MediaSource } from '../../types/media-source'
-import type { Episode, MediaType } from '../../types/tmdb'
+import type { Episode, MediaItem, MediaType } from '../../types/tmdb'
 import { imageUrl } from '../../utils/images'
+import { resolveStartEpisode, withStartTime } from '../../utils/media'
 import {
   logIframeConfiguration,
   PLAYER_IFRAME_ALLOW,
@@ -31,6 +33,10 @@ import {
 const EXTRACTION_TIMEOUT_MS = 15_000
 const IFRAME_LOAD_TIMEOUT_MS = 12_000
 const IFRAME_REVEAL_DELAY_MS = 180
+const PROGRESS_SAVE_INTERVAL_MS = 5_000
+// Saved positions outside this window restart the title instead of resuming.
+const MIN_RESUME_SECONDS = 10
+const MAX_RESUME_SHARE = 0.95
 
 type SourceFailureReason = 'no-player' | 'extract-timeout' | 'extract-error' | 'load-timeout' | 'embed-blocked' | 'media-error'
 
@@ -98,6 +104,7 @@ interface StreamingPlayerProps {
   id: number
   mediaType: MediaType
   title: string
+  media: MediaItem
   numberOfSeasons?: number | null
   sources: MediaSource[]
   theaterMode: boolean
@@ -108,51 +115,32 @@ export function StreamingPlayer({
   id,
   mediaType,
   title,
+  media,
   numberOfSeasons,
   sources,
   theaterMode,
   onTheaterModeChange,
 }: StreamingPlayerProps) {
-  const { isEpisodeWatched, toggleEpisodeWatched, setEpisodeWatched, getLastWatchedEpisode, isMovieWatched, setMovieWatched } = useWatchedHistory()
+  const {
+    isEpisodeWatched,
+    toggleEpisodeWatched,
+    isMovieWatched,
+    getResumeTarget,
+    getProgress,
+    recordPlaybackStart,
+    recordProgress,
+  } = useWatchedHistory()
 
-  // Calculate the next episode to watch based on history
-  const { initialSeason, initialEpisode } = useMemo(() => {
-    if (mediaType !== 'tv') return { initialSeason: 1, initialEpisode: 1 }
-    const lastWatched = getLastWatchedEpisode(id)
-    if (!lastWatched) {
-      const firstSource = sources[0]
-      return {
-        initialSeason: firstSource?.seasonNumber ?? 1,
-        initialEpisode: firstSource?.episodeNumber ?? 1,
-      }
-    }
-    
-    // Check if we have a direct next source in the static sources
-    const tvSources = sources
-      .filter((s) => s.seasonNumber != null && s.episodeNumber != null)
-      .sort((a, b) => a.seasonNumber! - b.seasonNumber! || a.episodeNumber! - b.episodeNumber!)
-      
-    const lastIndex = tvSources.findIndex(
-      (s) => s.seasonNumber === lastWatched.seasonNumber && s.episodeNumber === lastWatched.episodeNumber
-    )
-    
-    if (lastIndex !== -1 && lastIndex < tvSources.length - 1) {
-      const nextSource = tvSources[lastIndex + 1]
-      return {
-        initialSeason: nextSource.seasonNumber!,
-        initialEpisode: nextSource.episodeNumber!,
-      }
-    }
-    
-    // Default to next episode in the current season (will auto-correct if out of bounds when episodes load)
-    return {
-      initialSeason: lastWatched.seasonNumber,
-      initialEpisode: lastWatched.episodeNumber + 1,
-    }
-  }, [id, mediaType, sources, getLastWatchedEpisode])
+  const computeStartEpisode = () => {
+    if (mediaType !== 'tv') return { seasonNumber: 1, episodeNumber: 1 }
+    const target = getResumeTarget(id)
+    const targetWatched = target ? isEpisodeWatched(id, target.seasonNumber, target.episodeNumber) : false
+    return resolveStartEpisode(sources, target, targetWatched)
+  }
 
-  const [activeSeason, setActiveSeason] = useState(initialSeason)
-  const [activeEpisode, setActiveEpisode] = useState(initialEpisode)
+  const [initialStart] = useState(computeStartEpisode)
+  const [activeSeason, setActiveSeason] = useState(initialStart.seasonNumber)
+  const [activeEpisode, setActiveEpisode] = useState(initialStart.episodeNumber)
 
   const availableSeasons = useMemo(() => {
     const hasDynamic = sources.some((source) => source.isDynamic)
@@ -185,6 +173,7 @@ export function StreamingPlayer({
   const previousActiveSourceIdRef = useRef<string | null>(null)
 
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+  const [iframeStart, setIframeStart] = useState<{ key: string; src: string } | null>(null)
 
   useEffect(() => {
     sourceStatesRef.current = sourceStates
@@ -216,31 +205,10 @@ export function StreamingPlayer({
 
   // Sync state if id changes
   useEffect(() => {
-    if (mediaType === 'tv') {
-      const lastWatched = getLastWatchedEpisode(id)
-      if (!lastWatched) {
-        const firstSource = sources[0]
-        setActiveSeason(firstSource?.seasonNumber ?? 1)
-        setActiveEpisode(firstSource?.episodeNumber ?? 1)
-      } else {
-        const tvSources = sources
-          .filter((s) => s.seasonNumber != null && s.episodeNumber != null)
-          .sort((a, b) => a.seasonNumber! - b.seasonNumber! || a.episodeNumber! - b.episodeNumber!)
-          
-        const lastIndex = tvSources.findIndex(
-          (s) => s.seasonNumber === lastWatched.seasonNumber && s.episodeNumber === lastWatched.episodeNumber
-        )
-        
-        if (lastIndex !== -1 && lastIndex < tvSources.length - 1) {
-          const nextSource = tvSources[lastIndex + 1]
-          setActiveSeason(nextSource.seasonNumber!)
-          setActiveEpisode(nextSource.episodeNumber!)
-        } else {
-          setActiveSeason(lastWatched.seasonNumber)
-          setActiveEpisode(lastWatched.episodeNumber + 1)
-        }
-      }
-    }
+    if (mediaType !== 'tv') return
+    const start = computeStartEpisode()
+    setActiveSeason(start.seasonNumber)
+    setActiveEpisode(start.episodeNumber)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -260,19 +228,51 @@ export function StreamingPlayer({
     }
   }, [episodes, loadingEpisodes, activeSeason, activeEpisode, availableSeasons, mediaType])
 
+  const progressSeason = mediaType === 'tv' ? activeSeason : null
+  const progressEpisode = mediaType === 'tv' ? activeEpisode : null
+  const activeWatched = mediaType === 'tv' ? isEpisodeWatched(id, activeSeason, activeEpisode) : isMovieWatched(id)
+  const savedProgress = getProgress(mediaType, id, progressSeason, progressEpisode)
+  const resumePosition = !activeWatched
+    && savedProgress
+    && savedProgress.position > MIN_RESUME_SECONDS
+    && savedProgress.position < savedProgress.duration * MAX_RESUME_SHARE
+    ? savedProgress.position
+    : null
+
+  // Starting playback only records activity (for Continue Watching). A title is
+  // marked watched once enough of it has actually played, or manually.
   const handleStartPlayback = useCallback(() => {
-    if (mediaType === 'tv') {
-      if (!isEpisodeWatched(id, activeSeason, activeEpisode)) {
-        setEpisodeWatched(id, activeSeason, activeEpisode, true)
-      }
-    } else {
-      if (!isMovieWatched(id)) {
-        setMovieWatched(id, true)
-      }
-    }
-  }, [id, activeSeason, activeEpisode, mediaType, isEpisodeWatched, isMovieWatched, setEpisodeWatched, setMovieWatched])
+    recordPlaybackStart(media, progressSeason, progressEpisode)
+  }, [media, progressSeason, progressEpisode, recordPlaybackStart])
 
+  const lastProgressSaveRef = useRef(0)
+  const pendingProgressRef = useRef<{
+    season: number | null
+    episode: number | null
+    position: number
+    duration: number
+  } | null>(null)
 
+  const saveProgress = useCallback((position: number, duration: number, force = false) => {
+    if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0) return
+    pendingProgressRef.current = { season: progressSeason, episode: progressEpisode, position, duration }
+    const crossedThreshold = !activeWatched && position / duration >= WATCHED_THRESHOLD
+    const now = Date.now()
+    if (!force && !crossedThreshold && now - lastProgressSaveRef.current < PROGRESS_SAVE_INTERVAL_MS) return
+    lastProgressSaveRef.current = now
+    pendingProgressRef.current = null
+    recordProgress(mediaType, id, progressSeason, progressEpisode, position, duration)
+  }, [activeWatched, id, mediaType, progressEpisode, progressSeason, recordProgress])
+
+  // Flush the last throttled position when the episode changes or the player closes.
+  useEffect(() => () => {
+    const pending = pendingProgressRef.current
+    pendingProgressRef.current = null
+    if (pending) recordProgress(mediaType, id, pending.season, pending.episode, pending.position, pending.duration)
+  }, [id, mediaType, activeSeason, activeEpisode, recordProgress])
+
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  useEmbedProgress(iframeRef, ({ position, duration }) => saveProgress(position, duration))
 
   useEffect(() => {
     if (!theaterMode) return
@@ -496,6 +496,12 @@ export function StreamingPlayer({
       .map((source) => ({ source, episode: byEpisode.get(source.episodeNumber!) }))
   }, [activeSeason, episodes, sources, id])
 
+  // Freeze the start offset per player load; saving progress must not reload the iframe.
+  if (iframeKey && activeExtractedUrl && iframeStart?.key !== iframeKey) {
+    setIframeStart({ key: iframeKey, src: withStartTime(activeExtractedUrl, resumePosition) })
+  }
+  const iframeSrc = iframeStart?.key === iframeKey && iframeStart ? iframeStart.src : activeExtractedUrl
+
   if (!activeSource) {
     return (
       <section id="streaming-player" aria-labelledby="empty-player-heading" className="scroll-mt-20">
@@ -686,8 +692,9 @@ export function StreamingPlayer({
                 <div className="relative size-full bg-black">
                   {/* No sandbox: providers refuse to run in sandboxed frames. See utils/playerDebug.ts. */}
                   <iframe
+                    ref={iframeRef}
                     key={iframeKey}
-                    src={activeExtractedUrl}
+                    src={iframeSrc ?? activeExtractedUrl}
                     className={`block size-full border-0 bg-black object-contain transition-opacity duration-200 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
                     allow={PLAYER_IFRAME_ALLOW}
                     allowFullScreen
@@ -778,34 +785,33 @@ export function StreamingPlayer({
                     setVideoCurrentTime(video.currentTime)
                     setVideoVolume(video.volume)
                     setVideoMuted(video.muted)
+                    if (resumePosition !== null && resumePosition < video.duration * MAX_RESUME_SHARE) {
+                      video.currentTime = resumePosition
+                      setVideoCurrentTime(resumePosition)
+                    }
                   }}
                   onDurationChange={(event) => setVideoDuration(event.currentTarget.duration)}
                   onTimeUpdate={(event) => {
                     const video = event.currentTarget
                     setVideoCurrentTime(video.currentTime)
-                    if (video.duration > 0 && video.currentTime > video.duration * 0.9) {
-                      if (mediaType === 'tv') {
-                        if (!isEpisodeWatched(id, activeSeason, activeEpisode)) {
-                          setEpisodeWatched(id, activeSeason, activeEpisode, true)
-                        }
-                      } else if (mediaType === 'movie') {
-                        if (!isMovieWatched(id)) {
-                          setMovieWatched(id, true)
-                        }
-                      }
-                    }
+                    if (!video.paused) saveProgress(video.currentTime, video.duration)
                   }}
                   onPlay={() => {
                     setVideoPlaying(true)
                     handleStartPlayback()
                   }}
-                  onPause={() => setVideoPlaying(false)}
-                  onEnded={() => {
-                    if (mediaType === 'tv') {
-                      setEpisodeWatched(id, activeSeason, activeEpisode, true)
-                    } else if (mediaType === 'movie') {
-                      setMovieWatched(id, true)
-                    }
+                  onPause={(event) => {
+                    setVideoPlaying(false)
+                    const video = event.currentTarget
+                    if (!video.ended) saveProgress(video.currentTime, video.duration, true)
+                  }}
+                  onSeeked={(event) => {
+                    const video = event.currentTarget
+                    if (video.currentTime > 0) saveProgress(video.currentTime, video.duration, true)
+                  }}
+                  onEnded={(event) => {
+                    const video = event.currentTarget
+                    saveProgress(video.duration, video.duration, true)
                   }}
                   onVolumeChange={(event) => {
                     setVideoMuted(event.currentTarget.muted)

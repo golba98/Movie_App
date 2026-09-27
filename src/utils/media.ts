@@ -1,7 +1,10 @@
+import type { MediaSource } from '../types/media-source'
 import type {
   MediaItem,
   MediaType,
+  MovieDetails,
   TmdbMediaResult,
+  TvDetails,
   Video,
   WatchProvider,
 } from '../types/tmdb'
@@ -26,6 +29,23 @@ export function normalizeMedia(
     backdropPath: item.backdrop_path ?? null,
     voteAverage: typeof item.vote_average === 'number' ? item.vote_average : 0,
     date,
+    year: date?.slice(0, 4) || null,
+  }
+}
+
+export function detailsToMediaItem(data: MovieDetails | TvDetails, mediaType: MediaType): MediaItem {
+  const isMovie = mediaType === 'movie'
+  const title = isMovie ? (data as MovieDetails).title : (data as TvDetails).name
+  const date = isMovie ? (data as MovieDetails).release_date : (data as TvDetails).first_air_date
+  return {
+    id: data.id,
+    mediaType,
+    title,
+    overview: data.overview?.trim() ?? '',
+    posterPath: data.poster_path ?? null,
+    backdropPath: data.backdrop_path ?? null,
+    voteAverage: data.vote_average ?? 0,
+    date: date ?? null,
     year: date?.slice(0, 4) || null,
   }
 }
@@ -80,3 +100,53 @@ export function dedupeProviders(providers: WatchProvider[] = []) {
 
 export const mediaPath = (item: Pick<MediaItem, 'id' | 'mediaType'>) =>
   `/${item.mediaType}/${item.id}`
+
+// Embed hosts known to accept a start offset, and the query parameter they read.
+// Hosts not listed here are left untouched, so resume falls back to the episode.
+const EMBED_START_PARAMS: Record<string, string> = {
+  'vidlink.pro': 'startAt',
+  'player.videasy.net': 'progress',
+}
+
+export function withStartTime(url: string, seconds: number | null | undefined) {
+  if (!seconds || seconds < 1) return url
+  try {
+    const parsed = new URL(url)
+    const param = EMBED_START_PARAMS[parsed.hostname.replace(/^www\./, '')]
+    if (!param) return url
+    parsed.searchParams.set(param, String(Math.floor(seconds)))
+    return parsed.href
+  } catch {
+    return url
+  }
+}
+
+export interface EpisodeRef {
+  seasonNumber: number
+  episodeNumber: number
+}
+
+// Resume an unfinished episode where it was left; after a finished one, move on
+// to the next. Out-of-range guesses are corrected once the season's episodes load.
+export function resolveStartEpisode(sources: MediaSource[], target: EpisodeRef | null, targetWatched: boolean): EpisodeRef {
+  if (!target) {
+    const firstSource = sources[0]
+    return {
+      seasonNumber: firstSource?.seasonNumber ?? 1,
+      episodeNumber: firstSource?.episodeNumber ?? 1,
+    }
+  }
+  if (!targetWatched) return target
+
+  const tvSources = sources
+    .filter((s) => s.seasonNumber != null && s.episodeNumber != null)
+    .sort((a, b) => a.seasonNumber! - b.seasonNumber! || a.episodeNumber! - b.episodeNumber!)
+  const targetIndex = tvSources.findIndex(
+    (s) => s.seasonNumber === target.seasonNumber && s.episodeNumber === target.episodeNumber,
+  )
+  if (targetIndex !== -1 && targetIndex < tvSources.length - 1) {
+    const nextSource = tvSources[targetIndex + 1]
+    return { seasonNumber: nextSource.seasonNumber!, episodeNumber: nextSource.episodeNumber! }
+  }
+  return { seasonNumber: target.seasonNumber, episodeNumber: target.episodeNumber + 1 }
+}

@@ -990,58 +990,128 @@ test('an extractor error on one source does not break the other source', async (
   await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
 })
 
-test('watched history persists and shows progress for movies and TV episodes', async ({ page }) => {
-  // 1. Visit tv details page
+test('starting playback never marks a title watched, but adds it to Continue Watching', async ({ page }) => {
   await page.goto('/tv/10')
-  await expect(page.getByRole('button', { name: 'Watch Show' })).toBeVisible()
-
-  // 2. Open the player
   await page.getByRole('button', { name: 'Watch Show' }).click()
   await page.getByRole('button', { name: 'Exit theater mode' }).click()
 
   const player = page.locator('#streaming-player')
-  await expect(player).toBeVisible()
-
-  // 3. Verify watched indicator is "0 / 2 watched"
+  await expect(player.getByText('0 / 2 watched')).toBeVisible()
+  await player.getByRole('button', { name: 'Play video' }).click()
   await expect(player.getByText('0 / 2 watched')).toBeVisible()
 
-  // 4. Mark "Dulcinea" (Episode 1) as watched via checkmark
+  // Manual marking still works and moves the resume point past the episode.
   const episodeCard = player.locator('div').filter({ has: page.getByRole('button', { name: 'Dulcinea' }) }).last()
-  await expect(episodeCard).toBeVisible()
-  
-  const checkButton = episodeCard.getByRole('button', { name: 'Mark as watched' })
-  await expect(checkButton).toBeVisible()
-  await checkButton.click()
-
-  // 5. Verify watched indicator is "1 / 2 watched"
+  await episodeCard.getByRole('button', { name: 'Mark as watched' }).click()
   await expect(player.getByText('1 / 2 watched')).toBeVisible()
   await expect(episodeCard.getByRole('button', { name: 'Mark as unwatched' })).toBeVisible()
 
-  // 6. Navigate to homepage to verify show card displays watched status
-  await page.goto('/')
-  const expanseCard = page.locator('article', { hasText: 'The Expanse' }).first()
-  await expect(expanseCard).toBeVisible()
-  await expect(expanseCard.getByText('S1 E1')).toBeVisible()
-
-  // 7. Go back to TV details page and verify the Watch button is updated to "Resume S1 E1"
   await page.goto('/tv/10')
-  await expect(page.getByRole('button', { name: 'Resume S1 E1' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Watch S1 E2' })).toBeVisible()
 
-  // 8. Test Movie watched history
   await page.goto('/movie/1')
-  const watchMovieBtn = page.getByRole('button', { name: 'Watch Movie' })
-  await expect(watchMovieBtn).toBeVisible()
-  await watchMovieBtn.click()
+  await page.getByRole('button', { name: 'Watch Movie' }).click()
   await page.getByRole('button', { name: 'Exit theater mode' }).click()
-
-  // Start playback to trigger the movie as watched
   await player.getByRole('button', { name: 'Play video' }).click()
 
-  // Go to homepage and verify the Dune card has "Watched" badge
   await page.goto('/')
-  const duneCard = page.locator('article', { hasText: 'Dune: Part Two' }).first()
+  const continueRow = page.locator('#continue-watching')
+  await expect(continueRow.getByRole('heading', { name: 'Continue watching' })).toBeVisible()
+  const duneCard = continueRow.locator('article', { hasText: 'Dune: Part Two' })
   await expect(duneCard).toBeVisible()
-  await expect(duneCard.getByText('Watched')).toBeVisible()
+  await expect(duneCard.getByText('Watched')).toHaveCount(0)
+  await expect(continueRow.locator('article', { hasText: 'The Expanse' }).getByText('S1 E1')).toBeVisible()
+
+  await page.goto('/movie/1')
+  await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+  await page.getByRole('button', { name: 'Mark as watched' }).click()
+  await expect(page.getByRole('button', { name: 'Watched' })).toHaveAttribute('aria-pressed', 'true')
+
+  await page.goto('/')
+  await expect(continueRow.locator('article', { hasText: 'Dune: Part Two' })).toHaveCount(0)
+  await expect(page.locator('article', { hasText: 'Dune: Part Two' }).first().getByText('Watched')).toBeVisible()
 })
 
+test('history from the old format is kept as in progress and can be removed from Continue Watching', async ({ page }) => {
+  await page.goto('/')
+  await page.evaluate(() => {
+    localStorage.removeItem('fedora-movies:watched-history:v2')
+    localStorage.setItem('fedora-movies:watched-history:v1', JSON.stringify({
+      'movie:1': { watched: true, updatedAt: 1 },
+      'tv:10:1:2': { watched: true, updatedAt: 2 },
+    }))
+  })
+  await page.reload()
 
+  const continueRow = page.locator('#continue-watching')
+  const duneCard = continueRow.locator('article', { hasText: 'Dune: Part Two' })
+  await expect(duneCard).toBeVisible()
+  await expect(duneCard.getByText('Watched')).toHaveCount(0)
+  await expect(continueRow.locator('article', { hasText: 'The Expanse' }).getByText('S1 E2')).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('fedora-movies:watched-history:v1'))).toBeNull()
+
+  await page.goto('/tv/10')
+  await expect(page.getByRole('button', { name: 'Resume S1 E2' })).toBeVisible()
+
+  await page.goto('/')
+  await continueRow.getByRole('button', { name: 'Remove Dune: Part Two from Continue Watching' }).click()
+  await expect(continueRow.locator('article', { hasText: 'Dune: Part Two' })).toHaveCount(0)
+  await page.reload()
+  await expect(continueRow.locator('article', { hasText: 'The Expanse' })).toBeVisible()
+  await expect(continueRow.locator('article', { hasText: 'Dune: Part Two' })).toHaveCount(0)
+})
+
+test('embedded player progress is saved and Continue Watching resumes playback', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const embedUrl = 'https://player.example.test/embed/movie/1'
+  let reportedTime = 300
+  await page.route('**/api/media-sources/movie/1', async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          sources: [{
+            id: 'flixbaba-default',
+            mediaType: 'movie',
+            tmdbId: 1,
+            seasonNumber: null,
+            episodeNumber: null,
+            label: 'Flixbaba Stream (Dynamic)',
+            sourceUrl: 'https://flixbaba.mov/movie/1/dune-part-two/watch',
+            mimeType: 'video/mp4',
+            rightsBasis: 'licensed',
+            isDynamic: true,
+          }],
+        },
+      },
+    })
+  })
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    await route.fulfill({ json: { data: { extractedUrl: embedUrl } } })
+  })
+  await page.route('https://player.example.test/**', async (route) => {
+    const message = JSON.stringify({ type: 'PLAYER_EVENT', data: { event: 'timeupdate', currentTime: reportedTime, duration: 1000 } })
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: `<!doctype html><title>Test player</title><script>parent.postMessage(${message}, '*')</script>`,
+    })
+  })
+
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  await expect(page.locator('#streaming-player iframe')).toHaveAttribute('src', embedUrl)
+  await expect(page.getByRole('button', { name: 'Resume from 5:00' })).toBeVisible()
+
+  await page.goto('/')
+  const continueRow = page.locator('#continue-watching')
+  await expect(continueRow.getByRole('progressbar', { name: 'Dune: Part Two progress' })).toHaveAttribute('aria-valuenow', '30')
+
+  reportedTime = 950
+  await continueRow.getByRole('link', { name: 'Continue watching Dune: Part Two' }).first().click()
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+  await expect(page.locator('#streaming-player iframe')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Watched' })).toHaveAttribute('aria-pressed', 'true')
+
+  await page.goto('/')
+  await expect(page.locator('#continue-watching')).toHaveCount(0)
+})

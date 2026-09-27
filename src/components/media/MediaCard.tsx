@@ -1,4 +1,4 @@
-import { Heart, Star } from 'lucide-react'
+import { Heart, Star, X } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
 import { useFavourites } from '../../hooks/useFavourites'
 import { useWatchedHistory } from '../../hooks/useWatchedHistory'
@@ -6,27 +6,54 @@ import type { MediaItem } from '../../types/tmdb'
 import { formatRating, mediaPath } from '../../utils/media'
 import { PosterImage } from './PosterImage'
 
-export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolean }) {
+export type MediaCardVariant = 'default' | 'continue'
+
+export function MediaCard({
+  item,
+  row = false,
+  variant = 'default',
+}: {
+  item: MediaItem
+  row?: boolean
+  variant?: MediaCardVariant
+}) {
   const { isFavourite, toggleFavourite } = useFavourites()
-  const { getLastWatchedEpisode, isMovieWatched } = useWatchedHistory()
+  const { getResumeTarget, getProgress, isMovieWatched, removeFromContinueWatching } = useWatchedHistory()
   const favourite = isFavourite(item)
   const location = useLocation()
-  const lastWatched = item.mediaType === 'tv' ? getLastWatchedEpisode(item.id) : null
+  const continueCard = variant === 'continue'
+  const resumeEpisode = item.mediaType === 'tv' ? getResumeTarget(item.id) : null
   const movieWatched = item.mediaType === 'movie' ? isMovieWatched(item.id) : false
+  const progress = continueCard
+    ? getProgress(item.mediaType, item.id, resumeEpisode?.seasonNumber, resumeEpisode?.episodeNumber)
+    : null
+  const progressPercent = progress ? Math.min(100, Math.round((progress.position / progress.duration) * 100)) : 0
+  const linkState = continueCard ? { backgroundLocation: location, autoplay: true } : { backgroundLocation: location }
+  const linkLabel = continueCard ? `Continue watching ${item.title}` : `View details for ${item.title}`
 
   return (
     <article className={`group min-w-0 ${row ? 'w-[148px] shrink-0 sm:w-[168px] lg:w-[184px]' : ''}`}>
       <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-zinc-900 shadow-lg shadow-black/20 ring-1 ring-white/8 transition duration-300 group-hover:-translate-y-1 group-hover:ring-white/20 group-focus-within:ring-brand-400">
         <Link
           to={mediaPath(item)}
-          state={{ backgroundLocation: location }}
-          aria-label={`View details for ${item.title}`}
+          state={linkState}
+          aria-label={linkLabel}
           className="absolute inset-0 z-10 rounded-2xl"
         >
-          <span className="sr-only">View details for {item.title}</span>
+          <span className="sr-only">{linkLabel}</span>
         </Link>
         <PosterImage path={item.posterPath} title={item.title} />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/80 to-transparent" />
+        {continueCard && (
+          <button
+            type="button"
+            onClick={() => removeFromContinueWatching(item.mediaType, item.id)}
+            className="absolute left-2 top-2 z-20 grid size-11 place-items-center rounded-full border border-white/15 bg-black/80 text-white shadow-lg transition hover:bg-black/90"
+            aria-label={`Remove ${item.title} from Continue Watching`}
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => toggleFavourite(item)}
@@ -43,9 +70,9 @@ export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolea
         <span className="absolute bottom-2 left-2 z-0 rounded-md border border-white/10 bg-black/80 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-100">
           {item.mediaType === 'movie' ? 'Movie' : 'TV'}
         </span>
-        {item.mediaType === 'tv' && lastWatched && (
+        {item.mediaType === 'tv' && resumeEpisode && (
           <span className="absolute bottom-2 right-2 z-0 rounded-md border border-white/10 bg-brand-400 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-950 shadow-md">
-            S{lastWatched.seasonNumber} E{lastWatched.episodeNumber}
+            S{resumeEpisode.seasonNumber} E{resumeEpisode.episodeNumber}
           </span>
         )}
         {item.mediaType === 'movie' && movieWatched && (
@@ -53,11 +80,23 @@ export function MediaCard({ item, row = false }: { item: MediaItem; row?: boolea
             Watched
           </span>
         )}
+        {continueCard && progressPercent > 0 && (
+          <div
+            role="progressbar"
+            aria-label={`${item.title} progress`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+            className="absolute inset-x-0 bottom-0 z-0 h-1 bg-white/20"
+          >
+            <div className="h-full bg-brand-400" style={{ width: `${progressPercent}%` }} />
+          </div>
+        )}
       </div>
       <div className="mt-3 min-w-0">
         <Link
           to={mediaPath(item)}
-          state={{ backgroundLocation: location }}
+          state={linkState}
           className="line-clamp-2 rounded text-sm font-bold leading-5 text-zinc-100 transition hover:text-brand-400"
         >
           {item.title}
