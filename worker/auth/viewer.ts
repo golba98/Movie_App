@@ -1,28 +1,27 @@
+import { ApiError, json, readJson } from '../http'
+import { hashPassword, verifyPassword } from './crypto'
 import {
-  assertThrottleAllowed,
-  clearAuthFailures,
   createUserSession,
   expiredCookie,
-  hashPassword,
   publicAccount,
-  recordAuthFailure,
   requireUser,
   revokeRequestSession,
   sessionCookie,
+  signInThrottle,
   validatePassword,
-  verifyPassword,
   type AccountRow,
-} from './auth'
-import { ApiError, json, readJson } from './http'
+} from './sessions'
 
+// Stand-ins so an unknown username goes through the same password check as a real one.
 const DUMMY_SALT = 'AAAAAAAAAAAAAAAAAAAAAA'
 const DUMMY_HASH = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+const DUMMY_ITERATIONS = 600_000
 
 export async function viewerLogin(request: Request, env: Env) {
   const body = await readJson<{ username?: unknown; password?: unknown }>(request)
   const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : ''
   const password = typeof body.password === 'string' ? body.password : ''
-  const throttleKey = await assertThrottleAllowed(request, env.DB, `user:${username}`)
+  const throttleKey = await signInThrottle.assertAllowed(request, env.DB, `user:${username}`)
   const account = await env.DB
     .prepare('SELECT * FROM accounts WHERE username_normalized = ?')
     .bind(username)
@@ -31,14 +30,14 @@ export async function viewerLogin(request: Request, env: Env) {
     password,
     account?.password_hash ?? DUMMY_HASH,
     account?.password_salt ?? DUMMY_SALT,
-    account?.password_iterations ?? 600_000,
+    account?.password_iterations ?? DUMMY_ITERATIONS,
   )
   const now = Date.now()
   if (!account || !valid || account.is_active !== 1 || (account.expires_at !== null && account.expires_at <= now)) {
-    await recordAuthFailure(env.DB, throttleKey)
+    await signInThrottle.recordFailure(env.DB, throttleKey)
     throw new ApiError(401, 'INVALID_CREDENTIALS', 'The username or password is incorrect.')
   }
-  await clearAuthFailures(env.DB, throttleKey)
+  await signInThrottle.clearFailures(env.DB, throttleKey)
   await env.DB
     .prepare('UPDATE accounts SET last_login_at = ?, updated_at = ? WHERE id = ?')
     .bind(now, now, account.id)
@@ -66,14 +65,8 @@ export async function changePassword(request: Request, env: Env) {
   const body = await readJson<{ currentPassword?: unknown; newPassword?: unknown }>(request)
   const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
   const newPassword = validatePassword(body.newPassword, 'newPassword')
-  if (
-    !(await verifyPassword(
-      currentPassword,
-      session.account.password_hash,
-      session.account.password_salt,
-      session.account.password_iterations,
-    ))
-  ) {
+  const { password_hash, password_salt, password_iterations } = session.account
+  if (!(await verifyPassword(currentPassword, password_hash, password_salt, password_iterations))) {
     throw new ApiError(400, 'INVALID_CURRENT_PASSWORD', 'The current password is incorrect.', {
       currentPassword: 'The current password is incorrect.',
     })
@@ -85,6 +78,7 @@ export async function changePassword(request: Request, env: Env) {
   }
   const password = await hashPassword(newPassword)
   const now = Date.now()
+  // Other devices are signed out; this session carries on with the new password.
   await env.DB.batch([
     env.DB
       .prepare(

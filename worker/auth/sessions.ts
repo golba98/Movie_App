@@ -1,12 +1,16 @@
-import { hashPassword, randomToken, sha256, verifyPassword } from './crypto'
-import { ApiError, parseCookies, requestIp } from './http'
+import type { ViewerAccount } from '../../src/types/account'
+import { ApiError, parseCookies } from '../http'
+import { createThrottle } from '../throttle'
+import { randomToken, sha256 } from './crypto'
 
-export const USER_COOKIE = 'fedora_session'
-export const ADMIN_COOKIE = 'fedora_admin'
+const USER_COOKIE = 'fedora_session'
+const ADMIN_COOKIE = 'fedora_admin'
 const USER_SESSION_MS = 30 * 24 * 60 * 60 * 1000
 const ADMIN_SESSION_MS = 8 * 60 * 60 * 1000
-const ATTEMPT_WINDOW_MS = 15 * 60 * 1000
-const MAX_ATTEMPTS = 5
+
+type SessionKind = 'user' | 'admin'
+
+export const signInThrottle = createThrottle('auth_attempts', 'Too many sign-in attempts. Try again in 15 minutes.')
 
 export interface AccountRow {
   id: string
@@ -29,12 +33,12 @@ interface SessionAccountRow extends AccountRow {
   session_expires_at: number
 }
 
-export interface UserSession {
+interface UserSession {
   tokenHash: string
   account: AccountRow
 }
 
-export function publicAccount(account: AccountRow) {
+export function publicAccount(account: AccountRow): ViewerAccount {
   return {
     id: account.id,
     username: account.username,
@@ -48,28 +52,33 @@ export function publicAccount(account: AccountRow) {
   }
 }
 
-function cookieName(request: Request, kind: 'user' | 'admin') {
-  const secure = new URL(request.url).protocol === 'https:'
-  const name = kind === 'user' ? USER_COOKIE : ADMIN_COOKIE
-  return secure ? `__Host-${name}` : name
+const isSecure = (request: Request) => new URL(request.url).protocol === 'https:'
+const baseCookieName = (kind: SessionKind) => (kind === 'user' ? USER_COOKIE : ADMIN_COOKIE)
+
+// Over HTTPS the __Host- prefix pins the cookie to this exact origin.
+function cookieName(request: Request, kind: SessionKind) {
+  return isSecure(request) ? `__Host-${baseCookieName(kind)}` : baseCookieName(kind)
 }
 
-export function sessionCookie(request: Request, kind: 'user' | 'admin', token: string, maxAge: number) {
-  const secure = new URL(request.url).protocol === 'https:'
-  return `${cookieName(request, kind)}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`
+export function sessionCookie(request: Request, kind: SessionKind, token: string, maxAge: number) {
+  return `${cookieName(request, kind)}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${isSecure(request) ? '; Secure' : ''}`
 }
 
-export function expiredCookie(request: Request, kind: 'user' | 'admin') {
+export function expiredCookie(request: Request, kind: SessionKind) {
   return sessionCookie(request, kind, '', 0)
 }
 
-function sessionToken(request: Request, kind: 'user' | 'admin') {
+function sessionToken(request: Request, kind: SessionKind) {
   const cookies = parseCookies(request)
-  const plain = kind === 'user' ? USER_COOKIE : ADMIN_COOKIE
+  const plain = baseCookieName(kind)
   return cookies.get(cookieName(request, kind)) ?? cookies.get(plain) ?? cookies.get(`__Host-${plain}`)
 }
 
-async function createSession(db: D1Database, subjectType: 'user' | 'admin', accountId?: string) {
+async function touchSession(db: D1Database, tokenHash: string, now: number) {
+  await db.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?').bind(now, tokenHash).run()
+}
+
+async function createSession(db: D1Database, subjectType: SessionKind, accountId?: string) {
   const token = randomToken()
   const tokenHash = await sha256(token)
   const now = Date.now()
@@ -116,10 +125,7 @@ export async function requireUser(
   if (row.must_change_password === 1 && !options.allowPasswordChange) {
     throw new ApiError(403, 'PASSWORD_CHANGE_REQUIRED', 'Change your temporary password to continue.')
   }
-  await db
-    .prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?')
-    .bind(now, tokenHash)
-    .run()
+  await touchSession(db, tokenHash, now)
   return { tokenHash, account: row } satisfies UserSession
 }
 
@@ -136,64 +142,13 @@ export async function requireAdmin(request: Request, db: D1Database) {
     .bind(tokenHash, now)
     .first<{ token_hash: string }>()
   if (!session) throw new ApiError(401, 'ADMIN_AUTH_REQUIRED', 'Administrator sign-in is required.')
-  await db
-    .prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?')
-    .bind(now, tokenHash)
-    .run()
+  await touchSession(db, tokenHash, now)
   return tokenHash
 }
 
-export async function revokeRequestSession(request: Request, db: D1Database, kind: 'user' | 'admin') {
+export async function revokeRequestSession(request: Request, db: D1Database, kind: SessionKind) {
   const token = sessionToken(request, kind)
   if (token) await db.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256(token)).run()
-}
-
-export async function assertThrottleAllowed(request: Request, db: D1Database, scope: string) {
-  const throttleKey = await sha256(`${scope}:${requestIp(request)}`)
-  const now = Date.now()
-  const attempt = await db
-    .prepare('SELECT failure_count, window_started_at FROM auth_attempts WHERE throttle_key = ?')
-    .bind(throttleKey)
-    .first<{ failure_count: number; window_started_at: number }>()
-  if (attempt && now - attempt.window_started_at < ATTEMPT_WINDOW_MS && attempt.failure_count >= MAX_ATTEMPTS) {
-    throw new ApiError(429, 'TOO_MANY_ATTEMPTS', 'Too many sign-in attempts. Try again in 15 minutes.')
-  }
-  return throttleKey
-}
-
-export async function recordAuthFailure(db: D1Database, throttleKey: string) {
-  const now = Date.now()
-  await db
-    .prepare(
-      `INSERT INTO auth_attempts (throttle_key, failure_count, window_started_at, updated_at)
-       VALUES (?, 1, ?, ?)
-       ON CONFLICT(throttle_key) DO UPDATE SET
-         failure_count = CASE
-           WHEN ? - window_started_at >= ? THEN 1
-           ELSE failure_count + 1
-         END,
-         window_started_at = CASE
-           WHEN ? - window_started_at >= ? THEN ?
-           ELSE window_started_at
-         END,
-         updated_at = ?`,
-    )
-    .bind(
-      throttleKey,
-      now,
-      now,
-      now,
-      ATTEMPT_WINDOW_MS,
-      now,
-      ATTEMPT_WINDOW_MS,
-      now,
-      now,
-    )
-    .run()
-}
-
-export async function clearAuthFailures(db: D1Database, throttleKey: string) {
-  await db.prepare('DELETE FROM auth_attempts WHERE throttle_key = ?').bind(throttleKey).run()
 }
 
 export function validatePassword(password: unknown, field = 'password') {
@@ -204,5 +159,3 @@ export function validatePassword(password: unknown, field = 'password') {
   }
   return password
 }
-
-export { hashPassword, verifyPassword }

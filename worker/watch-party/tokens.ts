@@ -1,19 +1,21 @@
-import { signValue, verifySignedValue } from './crypto'
+import { signValue, verifySignedValue } from '../auth/crypto'
 
-export type WatchPartyAccessPayload = {
+// Room tokens are `<base64url JSON payload>.<HMAC signature>`, signed with WATCH_PARTY_SIGNING_SECRET.
+
+export interface WatchPartyAccessPayload {
   roomId: string
   memberId: string
   expiresAt: number
 }
 
-export type WatchPartyInvitationPayload = {
+export interface WatchPartyInvitationPayload {
   roomId: string
   invitationId: string
   version: number
   expiresAt: number
 }
 
-export type WatchPartyExtensionTokenPayload = {
+export interface WatchPartyExtensionTokenPayload {
   purpose: 'browser-extension'
   roomId: string
   memberId: string
@@ -42,6 +44,7 @@ export async function createWatchPartyToken(payload: object, secret: string) {
   return `${encoded}.${await signValue(encoded, secret)}`
 }
 
+/** The payload of a correctly signed token, or null. Expiry is left to the caller. */
 export async function readWatchPartyToken<T>(token: string | null, secret: string): Promise<T | null> {
   if (!token) return null
   const [encoded, signature, ...extra] = token.split('.')

@@ -1,4 +1,5 @@
 const encoder = new TextEncoder()
+
 // Cloudflare Workers' Web Crypto implementation currently accepts PBKDF2
 // iteration counts up to 100,000. Keeping the work factor at that supported
 // limit prevents authentication requests from failing at runtime.
@@ -28,18 +29,17 @@ export function randomToken() {
   return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
 }
 
+async function pbkdf2(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number) {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256)
+  return new Uint8Array(bits)
+}
+
 export async function hashPassword(password: string) {
   const salt = crypto.getRandomValues(new Uint8Array(16))
-  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, [
-    'deriveBits',
-  ])
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PASSWORD_ITERATIONS },
-    key,
-    256,
-  )
+  const bits = await pbkdf2(password, salt, PASSWORD_ITERATIONS)
   return {
-    hash: bytesToBase64Url(new Uint8Array(bits)),
+    hash: bytesToBase64Url(bits),
     salt: bytesToBase64Url(salt),
     iterations: PASSWORD_ITERATIONS,
   }
@@ -54,20 +54,12 @@ export async function verifyPassword(
   // Accounts created by an earlier deployment used an unsupported work factor.
   // They cannot be verified in the Worker, and must be reset by an administrator.
   if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > PASSWORD_ITERATIONS) return false
-  const salt = base64UrlToBytes(saltValue)
-  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, [
-    'deriveBits',
-  ])
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
-    key,
-    256,
-  )
-  const actual = new Uint8Array(bits)
+  const actual = await pbkdf2(password, base64UrlToBytes(saltValue), iterations)
   const expected = base64UrlToBytes(expectedHash)
   return actual.byteLength === expected.byteLength && subtle.timingSafeEqual(actual, expected)
 }
 
+// Both sides are hashed first so the comparison is constant-time even for different lengths.
 export async function timingSafeStringEqual(left: string, right: string) {
   const [leftHash, rightHash] = await Promise.all([
     crypto.subtle.digest('SHA-256', encoder.encode(left)),

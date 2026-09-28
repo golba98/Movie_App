@@ -1,16 +1,14 @@
-import { requireUser } from './auth'
-import { cleanMediaSnapshot } from './favourites'
-import { ApiError, json, readJson } from './http'
+import { requireUser } from '../auth/sessions'
+import { ApiError, json, readJson } from '../http'
+import { isRecord } from '../validate'
+import { cleanMediaSnapshot } from './media-snapshot'
 
 const MAX_SYNC_ITEMS = 500
+// `movie:<id>` or `tv:<id>:<season>:<episode>`, matching the client's entry keys.
 const ENTRY_KEY_PATTERN = /^(movie:[1-9]\d*|tv:[1-9]\d*:\d+:\d+)$/
 
 function invalid(message: string): never {
   throw new ApiError(400, 'INVALID_WATCH_HISTORY', message)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function cleanUpdatedAt(value: unknown) {
@@ -63,35 +61,48 @@ function cleanTitle(input: unknown) {
   } as const
 }
 
+interface EntryRow {
+  entry_key: string
+  watched: number
+  position: number | null
+  duration: number | null
+  watch_seconds: number
+  updated_at: number
+}
+
+interface TitleRow {
+  media_type: 'movie' | 'tv'
+  media_id: number
+  season_number: number | null
+  episode_number: number | null
+  item_json: string | null
+  removed: number
+  updated_at: number
+}
+
+function parseItem(json: string | null): unknown {
+  try {
+    return json ? JSON.parse(json) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The account's history in the client's shape: entries and titles keyed like its local cache. */
 export async function getWatchHistory(request: Request, env: Env) {
   const session = await requireUser(request, env.DB)
   const [entryRows, titleRows] = await Promise.all([
     env.DB
       .prepare('SELECT entry_key, watched, position, duration, watch_seconds, updated_at FROM watch_entries WHERE account_id = ?')
       .bind(session.account.id)
-      .all<{
-        entry_key: string
-        watched: number
-        position: number | null
-        duration: number | null
-        watch_seconds: number
-        updated_at: number
-      }>(),
+      .all<EntryRow>(),
     env.DB
       .prepare(
         `SELECT media_type, media_id, season_number, episode_number, item_json, removed, updated_at
          FROM watch_titles WHERE account_id = ? ORDER BY updated_at DESC`,
       )
       .bind(session.account.id)
-      .all<{
-        media_type: 'movie' | 'tv'
-        media_id: number
-        season_number: number | null
-        episode_number: number | null
-        item_json: string | null
-        removed: number
-        updated_at: number
-      }>(),
+      .all<TitleRow>(),
   ])
 
   const entries: Record<string, unknown> = {}
@@ -107,12 +118,7 @@ export async function getWatchHistory(request: Request, env: Env) {
 
   const titles: Record<string, unknown> = {}
   for (const row of titleRows.results) {
-    let item: unknown
-    try {
-      item = row.item_json ? JSON.parse(row.item_json) : undefined
-    } catch {
-      item = undefined
-    }
+    const item = parseItem(row.item_json)
     titles[`${row.media_type}:${row.media_id}`] = {
       mediaType: row.media_type,
       id: row.media_id,

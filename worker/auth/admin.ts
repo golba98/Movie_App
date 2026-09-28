@@ -1,18 +1,22 @@
+import { ApiError, json, readJson } from '../http'
+import { assertNoFieldErrors, rethrowUniqueViolation } from '../validate'
+import { auditAdminEvent } from './audit'
+import { hashPassword, timingSafeStringEqual } from './crypto'
 import {
-  assertThrottleAllowed,
-  clearAuthFailures,
   createAdminSession,
   expiredCookie,
-  hashPassword,
   publicAccount,
-  recordAuthFailure,
   requireAdmin,
   revokeRequestSession,
   sessionCookie,
+  signInThrottle,
   validatePassword,
-} from './auth'
-import { sha256, timingSafeStringEqual } from './crypto'
-import { ApiError, json, readJson, requestIp } from './http'
+  type AccountRow,
+} from './sessions'
+
+const MAX_LISTED_ACCOUNTS = 200
+const DEFAULT_LISTED_ACCOUNTS = 100
+const MAX_AUDIT_EVENTS = 100
 
 function cleanUsername(value: unknown) {
   if (typeof value !== 'string') return null
@@ -26,6 +30,14 @@ function cleanDisplayName(value: unknown) {
   return displayName.length >= 1 && displayName.length <= 80 ? displayName : null
 }
 
+function findAccount(db: D1Database, accountId: string) {
+  return db.prepare('SELECT * FROM accounts WHERE id = ?').bind(accountId).first<AccountRow>()
+}
+
+async function revokeAllSessions(db: D1Database, accountId: string) {
+  return db.prepare('DELETE FROM sessions WHERE account_id = ?').bind(accountId).run()
+}
+
 function cleanExpiry(value: unknown) {
   if (value === null || value === undefined || value === '') return null
   const timestamp = typeof value === 'number' ? value : Date.parse(String(value))
@@ -35,23 +47,6 @@ function cleanExpiry(value: unknown) {
     })
   }
   return timestamp
-}
-
-export async function auditAdminEvent(
-  request: Request,
-  env: Env,
-  action: string,
-  targetAccountId: string | null,
-  metadata: Record<string, unknown> = {},
-) {
-  const ipHash = await sha256(requestIp(request))
-  await env.DB
-    .prepare(
-      `INSERT INTO admin_audit_log (action, target_account_id, metadata, ip_hash, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .bind(action, targetAccountId, JSON.stringify(metadata), ipHash, Date.now())
-    .run()
 }
 
 export async function adminLogin(request: Request, env: Env) {
@@ -64,12 +59,13 @@ export async function adminLogin(request: Request, env: Env) {
   }
   const body = await readJson<{ password?: unknown }>(request)
   const password = typeof body.password === 'string' ? body.password : ''
-  const throttleKey = await assertThrottleAllowed(request, env.DB, 'admin')
+  const throttleKey = await signInThrottle.assertAllowed(request, env.DB, 'admin')
   if (!(await timingSafeStringEqual(password, env.ADMIN_PASSWORD))) {
-    await recordAuthFailure(env.DB, throttleKey)
+    await signInThrottle.recordFailure(env.DB, throttleKey)
     throw new ApiError(401, 'INVALID_CREDENTIALS', 'The administrator password is incorrect.')
   }
-  await clearAuthFailures(env.DB, throttleKey)
+  await signInThrottle.clearFailures(env.DB, throttleKey)
+  // Sweep expired administrator sessions while we are here.
   await env.DB.prepare("DELETE FROM sessions WHERE subject_type = 'admin' AND expires_at <= ?").bind(Date.now()).run()
   const session = await createAdminSession(env.DB)
   await auditAdminEvent(request, env, 'admin.login', null)
@@ -94,7 +90,7 @@ export async function listAccounts(request: Request, env: Env) {
   await requireAdmin(request, env.DB)
   const url = new URL(request.url)
   const search = url.searchParams.get('search')?.trim().toLowerCase() ?? ''
-  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 100, 1), 200)
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || DEFAULT_LISTED_ACCOUNTS, 1), MAX_LISTED_ACCOUNTS)
   const rows = search
     ? await env.DB
         .prepare(
@@ -103,11 +99,11 @@ export async function listAccounts(request: Request, env: Env) {
            ORDER BY created_at DESC LIMIT ?`,
         )
         .bind(`%${search}%`, `%${search}%`, limit)
-        .all<Parameters<typeof publicAccount>[0]>()
+        .all<AccountRow>()
     : await env.DB
         .prepare('SELECT * FROM accounts ORDER BY created_at DESC LIMIT ?')
         .bind(limit)
-        .all<Parameters<typeof publicAccount>[0]>()
+        .all<AccountRow>()
   return json({ accounts: rows.results.map(publicAccount) })
 }
 
@@ -124,9 +120,7 @@ export async function createAccount(request: Request, env: Env) {
   const fieldErrors: Record<string, string> = {}
   if (!username) fieldErrors.username = 'Use 3–32 letters, numbers, dots, dashes, or underscores.'
   if (!displayName) fieldErrors.displayName = 'Enter a display name up to 80 characters.'
-  if (Object.keys(fieldErrors).length) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Check the highlighted fields.', fieldErrors)
-  }
+  assertNoFieldErrors(fieldErrors)
   const temporaryPassword = validatePassword(body.temporaryPassword, 'temporaryPassword')
   const expiresAt = cleanExpiry(body.expiresAt)
   const password = await hashPassword(temporaryPassword)
@@ -154,21 +148,18 @@ export async function createAccount(request: Request, env: Env) {
       )
       .run()
   } catch (error) {
-    if (String(error).toLowerCase().includes('unique')) {
-      throw new ApiError(409, 'USERNAME_TAKEN', 'That username is already in use.', {
-        username: 'Choose a different username.',
-      })
-    }
-    throw error
+    rethrowUniqueViolation(error, new ApiError(409, 'USERNAME_TAKEN', 'That username is already in use.', {
+      username: 'Choose a different username.',
+    }))
   }
-  const account = await env.DB.prepare('SELECT * FROM accounts WHERE id = ?').bind(id).first<Parameters<typeof publicAccount>[0]>()
+  const account = await findAccount(env.DB, id)
   await auditAdminEvent(request, env, 'account.create', id, { username, expiresAt })
   return json({ account: publicAccount(account!) }, 201)
 }
 
 export async function updateAccount(request: Request, env: Env, accountId: string) {
   await requireAdmin(request, env.DB)
-  const current = await env.DB.prepare('SELECT * FROM accounts WHERE id = ?').bind(accountId).first<Parameters<typeof publicAccount>[0]>()
+  const current = await findAccount(env.DB, accountId)
   if (!current) throw new ApiError(404, 'ACCOUNT_NOT_FOUND', 'Account not found.')
   const body = await readJson<{ displayName?: unknown; active?: unknown; expiresAt?: unknown }>(request)
   const displayName = body.displayName === undefined ? current.display_name : cleanDisplayName(body.displayName)
@@ -186,11 +177,10 @@ export async function updateAccount(request: Request, env: Env, accountId: strin
     .prepare('UPDATE accounts SET display_name = ?, is_active = ?, expires_at = ?, updated_at = ? WHERE id = ?')
     .bind(displayName, active ? 1 : 0, expiresAt, Date.now(), accountId)
     .run()
-  if (!active || (expiresAt !== null && expiresAt <= Date.now())) {
-    await env.DB.prepare('DELETE FROM sessions WHERE account_id = ?').bind(accountId).run()
-  }
+  // A disabled or expired account is signed out everywhere straight away.
+  if (!active || (expiresAt !== null && expiresAt <= Date.now())) await revokeAllSessions(env.DB, accountId)
   await auditAdminEvent(request, env, 'account.update', accountId, { displayName, active, expiresAt })
-  const account = await env.DB.prepare('SELECT * FROM accounts WHERE id = ?').bind(accountId).first<Parameters<typeof publicAccount>[0]>()
+  const account = await findAccount(env.DB, accountId)
   return json({ account: publicAccount(account!) })
 }
 
@@ -207,7 +197,7 @@ export async function resetAccountPassword(request: Request, env: Env, accountId
     .bind(password.hash, password.salt, password.iterations, Date.now(), accountId)
     .run()
   if (!result.meta.changes) throw new ApiError(404, 'ACCOUNT_NOT_FOUND', 'Account not found.')
-  await env.DB.prepare('DELETE FROM sessions WHERE account_id = ?').bind(accountId).run()
+  await revokeAllSessions(env.DB, accountId)
   await auditAdminEvent(request, env, 'account.reset_password', accountId)
   return json({ reset: true })
 }
@@ -216,7 +206,7 @@ export async function revokeAccountSessions(request: Request, env: Env, accountI
   await requireAdmin(request, env.DB)
   const account = await env.DB.prepare('SELECT id FROM accounts WHERE id = ?').bind(accountId).first()
   if (!account) throw new ApiError(404, 'ACCOUNT_NOT_FOUND', 'Account not found.')
-  const result = await env.DB.prepare('DELETE FROM sessions WHERE account_id = ?').bind(accountId).run()
+  const result = await revokeAllSessions(env.DB, accountId)
   await auditAdminEvent(request, env, 'account.revoke_sessions', accountId, { revoked: result.meta.changes })
   return json({ revoked: result.meta.changes })
 }
@@ -247,8 +237,9 @@ export async function listAudit(request: Request, env: Env) {
               a.username AS target_username
        FROM admin_audit_log l
        LEFT JOIN accounts a ON a.id = l.target_account_id
-       ORDER BY l.created_at DESC LIMIT 100`,
+       ORDER BY l.created_at DESC LIMIT ?`,
     )
+    .bind(MAX_AUDIT_EVENTS)
     .all<{
       id: number
       action: string
