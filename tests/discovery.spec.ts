@@ -86,6 +86,9 @@ test('omits the legal-provider section when South Africa has no providers', asyn
 })
 
 test('@mobile browse pagination, invalid routes, and responsive layouts remain functional', async ({ page }, testInfo) => {
+  // Desktop runs sweep six widths, loading every page at each; that outlasts
+  // the default timeout when the whole suite runs in parallel.
+  test.slow(testInfo.project.name === 'chromium', 'Loads every page at six viewport widths')
   await page.goto('/movies')
   await expect(page.getByRole('heading', { level: 1, name: 'Popular movies' })).toBeVisible()
   await page.getByRole('button', { name: 'Load more' }).click()
