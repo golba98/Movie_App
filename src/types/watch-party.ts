@@ -13,6 +13,18 @@ export type PlaybackKind = 'video' | 'hls' | 'embed'
 
 export const WATCH_PARTY_EXTENSION_CAPABILITY_VERSION = 1
 
+// Drift correction shared by the website player and the companion extension:
+// drift within `ignoreMs` is left alone, up to `seekMs` is nudged with the
+// playback rate (1% per `msPerRateUnit / 100` ms, within min/maxRate), and
+// anything larger seeks.
+export const DRIFT_CORRECTION = {
+  ignoreMs: 250,
+  seekMs: 1_500,
+  msPerRateUnit: 50_000,
+  minRate: 0.97,
+  maxRate: 1.03,
+} as const
+
 export interface WatchPartyPlaybackCommand {
   reason: WatchPartyPlaybackCommandReason
   executeAtServerMs: number

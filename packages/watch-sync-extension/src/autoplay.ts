@@ -1,3 +1,7 @@
+/**
+ * Remembers when the browser refused autoplay, so play() is not retried until
+ * the viewer interacts with the page (a trusted click or key press).
+ */
 export class AutoplayGate {
   private blocked = false
 

@@ -1,3 +1,4 @@
+/** Runs one delayed callback at a time, and only for the newest room revision. */
 export class RevisionScheduler {
   private revision = -1
   private timer: ReturnType<typeof setTimeout> | null = null

@@ -1,7 +1,14 @@
-export type PlaybackState = 'waiting' | 'playing' | 'paused' | 'buffering' | 'ended'
-export type SocketStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
-export type PlaybackCommandReason = 'play' | 'pause' | 'seek' | 'restart' | 'rate' | 'recovery'
+import type {
+  WatchPartyPlaybackCommand,
+  WatchPartyPlaybackState,
+} from '../../../src/types/watch-party'
+import { isRecord, isSocketStatus, type SocketStatus } from './protocol'
 
+export type { SocketStatus }
+export type PlaybackState = WatchPartyPlaybackState
+export type PlaybackCommandMetadata = WatchPartyPlaybackCommand
+
+// The subset of the room's WatchPartyState the extension relies on.
 export interface AuthoritativeState {
   roomId: string
   roomCode: string
@@ -14,11 +21,6 @@ export interface AuthoritativeState {
   hostId: string
   serverNow: number
   participants: { id: string; displayName: string; role: string; canControl: boolean }[]
-}
-
-export interface PlaybackCommandMetadata {
-  reason: PlaybackCommandReason
-  executeAtServerMs: number
 }
 
 export type RoomServerEvent =
@@ -106,13 +108,16 @@ export type InternalMessage =
   | { type: 'background:token-request'; nonce: string; clientSessionId: string }
   | { type: 'background:status'; status: SocketStatus; message: string; clientSessionId: string }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const PLAYBACK_STATES = ['waiting', 'playing', 'paused', 'buffering', 'ended']
+
+function stringsFrom(value: Record<string, unknown>, ...keys: string[]) {
+  return keys.every((key) => typeof value[key] === 'string' && (value[key] as string).length > 0)
 }
 
+/** Messages between the background worker, content scripts and popup, checked field by field. */
 export function isInternalMessage(value: unknown): value is InternalMessage {
   if (!isRecord(value) || typeof value.type !== 'string') return false
-  const strings = (...keys: string[]) => keys.every((key) => typeof value[key] === 'string' && (value[key] as string).length > 0)
+  const strings = (...keys: string[]) => stringsFrom(value, ...keys)
   const finiteOptional = (key: string) => value[key] === undefined || (typeof value[key] === 'number' && Number.isFinite(value[key]))
   switch (value.type) {
     case 'bridge:hello':
@@ -136,7 +141,7 @@ export function isInternalMessage(value: unknown): value is InternalMessage {
         && typeof value.buffering === 'boolean'
         && Number.isInteger(value.readyState)
         && typeof value.playbackState === 'string'
-        && ['waiting', 'playing', 'paused', 'buffering', 'ended'].includes(value.playbackState)
+        && PLAYBACK_STATES.includes(value.playbackState)
     case 'frame:activation-required':
       return strings('message')
     case 'frame:unavailable':
@@ -168,7 +173,7 @@ export function isInternalMessage(value: unknown): value is InternalMessage {
     case 'background:token-request':
       return strings('nonce', 'clientSessionId')
     case 'background:status':
-      return strings('message', 'clientSessionId') && ['idle', 'connecting', 'connected', 'reconnecting', 'disconnected', 'error'].includes(String(value.status))
+      return strings('message', 'clientSessionId') && isSocketStatus(value.status)
     case 'background:remote-command':
       return isRecord(value.state) && Number.isSafeInteger(value.state.revision) && typeof value.clockOffsetMs === 'number' && Number.isFinite(value.clockOffsetMs)
     default:
@@ -176,10 +181,7 @@ export function isInternalMessage(value: unknown): value is InternalMessage {
   }
 }
 
-function stringsFrom(value: Record<string, unknown>, ...keys: string[]) {
-  return keys.every((key) => typeof value[key] === 'string' && (value[key] as string).length > 0)
-}
-
+/** Room server events, checked only as far as the extension reads them. */
 export function isRoomServerEvent(value: unknown): value is RoomServerEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false
   if (value.type === 'error') return typeof value.code === 'string' && typeof value.message === 'string'

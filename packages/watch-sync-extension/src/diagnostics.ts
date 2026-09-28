@@ -1,3 +1,5 @@
+// Diagnostics are exported by the viewer for bug reports, so only these
+// fields are kept and anything resembling a credential or URL is redacted.
 const allowedFields = new Set([
   'timestamp', 'kind', 'tabId', 'frameId', 'documentId', 'origin', 'candidateCount', 'fingerprint',
   'permissionState', 'socketState', 'controllerState', 'revision', 'driftMs', 'correction', 'readiness',
@@ -20,6 +22,7 @@ export function redactDiagnosticValue(value: unknown, key = ''): unknown {
   return value
 }
 
+/** A bounded log of redacted diagnostic events. */
 export class DiagnosticRing {
   private entries: Record<string, unknown>[] = []
 

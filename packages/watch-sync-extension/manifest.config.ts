@@ -1,13 +1,9 @@
 import { defineManifest } from '@crxjs/vite-plugin'
+import { TRUSTED_APP_ORIGINS } from './src/protocol'
 
-export const trustedAppMatches = [
-  'https://movie-app.jordanvorster404.workers.dev/*',
-  'http://127.0.0.1:4173/*',
-  'http://localhost:4173/*',
-  'http://127.0.0.1:5173/*',
-  'http://localhost:5173/*',
-]
+const trustedAppMatches = TRUSTED_APP_ORIGINS.map((origin) => `${origin}/*`)
 
+/** The production manifest; tests add fixture hosts and a distinct name. */
 export function createManifest(extraHostPermissions: string[] = [], name = 'Fedora Movies Watch Sync') {
   return defineManifest({
     manifest_version: 3,

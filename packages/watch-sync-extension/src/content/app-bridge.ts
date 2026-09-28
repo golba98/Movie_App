@@ -1,54 +1,51 @@
-import type { InternalMessage, SocketStatus } from '../types'
-
-const VERSION = 1
-const WEBSITE_SOURCE = 'fedora-movies-watch-party'
-const EXTENSION_SOURCE = 'fedora-movies-watch-sync-extension'
-const trustedOrigins = new Set([
-  'https://movie-app.jordanvorster404.workers.dev',
-  'http://127.0.0.1:4173',
-  'http://localhost:4173',
-  'http://127.0.0.1:5173',
-  'http://localhost:5173',
-])
+// Relays between the watch-party page (window.postMessage) and the background
+// worker (chrome.runtime), on trusted app pages only.
+import {
+  BRIDGE_VERSION,
+  EXTENSION_SOURCE,
+  isBridgeId,
+  isRecord,
+  isSocketStatus,
+  TRUSTED_APP_ORIGINS,
+  WEBSITE_SOURCE,
+} from '../protocol'
+import type { InternalMessage } from '../types'
 
 interface BridgeIdentity {
   nonce: string
   clientSessionId: string
 }
 
-function bridgeId(value: unknown) {
-  return typeof value === 'string' && value.length >= 16 && value.length <= 128 && /^[A-Za-z0-9_-]+$/.test(value)
-}
-
-function isWebsiteHello(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const candidate = value as Record<string, unknown>
-  return candidate.source === WEBSITE_SOURCE
-    && candidate.protocolVersion === VERSION
-    && candidate.type === 'website:hello'
-    && Object.keys(candidate).length === 3
-}
-
-function isWebsiteMessage(value: unknown): value is {
+interface WebsiteMessage {
   source: typeof WEBSITE_SOURCE
   type: 'website:connect' | 'website:token' | 'website:disconnect'
-  protocolVersion: 1
+  protocolVersion: typeof BRIDGE_VERSION
   roomId?: string
   nonce?: string
   clientSessionId: string
   extensionToken?: string
   socketUrl?: string
-} {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const candidate = value as Record<string, unknown>
-  if (candidate.source !== WEBSITE_SOURCE || candidate.protocolVersion !== VERSION || !bridgeId(candidate.clientSessionId)) return false
+}
+
+function isWebsiteHello(value: unknown) {
+  return isRecord(value)
+    && value.source === WEBSITE_SOURCE
+    && value.protocolVersion === BRIDGE_VERSION
+    && value.type === 'website:hello'
+    && Object.keys(value).length === 3
+}
+
+function isWebsiteMessage(value: unknown): value is WebsiteMessage {
+  if (!isRecord(value)) return false
+  const candidate = value
+  if (candidate.source !== WEBSITE_SOURCE || candidate.protocolVersion !== BRIDGE_VERSION || !isBridgeId(candidate.clientSessionId)) return false
   if (candidate.type === 'website:disconnect') {
     return Object.keys(candidate).length === 4
   }
   return (candidate.type === 'website:connect' || candidate.type === 'website:token')
     && typeof candidate.roomId === 'string'
     && candidate.roomId.length >= 16
-    && bridgeId(candidate.nonce)
+    && isBridgeId(candidate.nonce)
     && typeof candidate.extensionToken === 'string'
     && candidate.extensionToken.length >= 32
     && typeof candidate.socketUrl === 'string'
@@ -59,12 +56,12 @@ function isWebsiteMessage(value: unknown): value is {
 function postToPage(message: Record<string, unknown>) {
   window.postMessage({
     source: EXTENSION_SOURCE,
-    protocolVersion: VERSION,
+    protocolVersion: BRIDGE_VERSION,
     ...message,
   }, location.origin)
 }
 
-if (window === window.top && trustedOrigins.has(location.origin)) {
+if (window === window.top && TRUSTED_APP_ORIGINS.includes(location.origin)) {
   let identity: BridgeIdentity | null = null
   let handshakeInFlight = false
 
@@ -79,12 +76,14 @@ if (window === window.top && trustedOrigins.has(location.origin)) {
     handshakeInFlight = true
     void chrome.runtime.sendMessage({ type: 'bridge:hello', origin: location.origin } satisfies InternalMessage)
       .then((response: BridgeIdentity | undefined) => {
-        if (!response || !bridgeId(response.nonce) || !bridgeId(response.clientSessionId)) return
+        if (!response || !isBridgeId(response.nonce) || !isBridgeId(response.clientSessionId)) return
         identity = response
         announce()
       })
       .catch(() => undefined)
-      .finally(() => { handshakeInFlight = false })
+      .finally(() => {
+        handshakeInFlight = false
+      })
   }
 
   requestIdentity()
@@ -113,9 +112,9 @@ if (window === window.top && trustedOrigins.has(location.origin)) {
   })
 
   chrome.runtime.onMessage.addListener((message: unknown) => {
-    if (!message || typeof message !== 'object' || Array.isArray(message)) return
-    const candidate = message as Record<string, unknown>
-    if (candidate.type === 'background:token-request' && bridgeId(candidate.nonce) && bridgeId(candidate.clientSessionId)) {
+    if (!isRecord(message)) return
+    const candidate = message
+    if (candidate.type === 'background:token-request' && isBridgeId(candidate.nonce) && isBridgeId(candidate.clientSessionId)) {
       postToPage({
         type: 'extension:token-request',
         nonce: candidate.nonce,
@@ -124,14 +123,14 @@ if (window === window.top && trustedOrigins.has(location.origin)) {
     }
     if (
       candidate.type === 'background:status'
-      && bridgeId(candidate.clientSessionId)
+      && isBridgeId(candidate.clientSessionId)
       && typeof candidate.message === 'string'
-      && ['idle', 'connecting', 'connected', 'reconnecting', 'disconnected', 'error'].includes(String(candidate.status))
+      && isSocketStatus(candidate.status)
     ) {
       postToPage({
         type: 'extension:status',
         clientSessionId: candidate.clientSessionId,
-        status: candidate.status as SocketStatus,
+        status: candidate.status,
         message: candidate.message.slice(0, 240),
       })
     }
