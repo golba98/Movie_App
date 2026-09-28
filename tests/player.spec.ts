@@ -335,7 +335,7 @@ test('player automatically falls back to the next available source if the first 
   await expect(iframe).toHaveAttribute('src', embedUrl)
   
   const activeSourceButton = page.locator('#streaming-player button', { hasText: 'Server Two' })
-  await expect(activeSourceButton).toHaveClass(/bg-emerald-500/)
+  await expect(activeSourceButton).toHaveAttribute('aria-pressed', 'true')
 
   expect(extractionRequests).toEqual([
     'https://serverone.test/movie/1',
@@ -353,7 +353,7 @@ test('a provider that refuses embedding fails only its own source and offers the
 
   const iframe = page.locator('#streaming-player iframe')
   await expect(iframe).toHaveAttribute('src', embedUrl)
-  await expect(page.locator('#streaming-player button', { hasText: 'Server Two' })).toHaveClass(/bg-emerald-500/)
+  await expect(page.locator('#streaming-player button', { hasText: 'Server Two' })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
 
   // Choosing the refused source explicitly shows that source's own error.
@@ -381,7 +381,7 @@ test('an extractor error on one source does not break the other source', async (
   const iframe = page.locator('#streaming-player iframe')
   await expect(iframe).toHaveAttribute('src', embedUrl)
   await expect(iframe).not.toHaveAttribute('sandbox')
-  await expect(page.locator('#streaming-player button', { hasText: 'Server Two' })).toHaveClass(/bg-emerald-500/)
+  await expect(page.locator('#streaming-player button', { hasText: 'Server Two' })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
 })
 test('a stuck embedded player can be reloaded without leaving the page', async ({ page }) => {

@@ -14,5 +14,5 @@ export function expiryValue(value: string) {
   return value ? new Date(`${value}T23:59:59`).getTime() : null
 }
 
-// The earliest expiry the form accepts: tomorrow.
-export const MIN_EXPIRY_DATE = dateInputValue(Date.now() + DAY_MS)
+/** The earliest expiry the form accepts: tomorrow, worked out when asked so it never goes stale. */
+export const minExpiryDate = () => dateInputValue(Date.now() + DAY_MS)

@@ -155,6 +155,8 @@ Migration `0007_watch_history.sql` creates the per-account watch history tables 
 
 Migration `0008_watch_time.sql` adds the real playback time the player's watcher counts per movie or episode. A title enters history after 5 minutes of it and is marked watched once it covers 90% of the runtime. Apply it before deploying the Worker that reads and writes `watchSeconds`.
 
+Migration `0009_search_provider_embeds.sql` adds optional movie and TV embed patterns to search providers, carries over the embed rule the Worker used to hardcode for the two seeded providers, and relabels those providers "Source 1" and "Source 2" (the names viewers already saw). Apply it before deploying the Worker that reads the new columns.
+
 ## Limits of the protection model
 
 Fedora Movies can enforce account access, keep privileged credentials server-side, record administrative changes, isolate optional external players from the app shell, and reduce duplicated resolver work. These controls reduce the application attack surface and improve reliability.

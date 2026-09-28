@@ -9,6 +9,7 @@
   "scripts": {
     "start": "vite --open",
     "dev": "vite",
+    "dev:lan": "vite --host",
     "build": "tsc -b && vite build",
     "build:watch-party": "VITE_ENABLE_WATCH_PARTY=true npm run build",
     "typecheck": "tsc -b --pretty false && npm run typecheck -w @fedora-movies/watch-sync-extension",

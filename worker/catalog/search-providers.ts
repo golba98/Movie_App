@@ -10,6 +10,8 @@ interface SearchProviderRow {
   base_url: string
   movie_url_pattern: string
   tv_url_pattern: string
+  movie_embed_pattern: string
+  tv_embed_pattern: string
   is_active: number
   created_at: number
   updated_at: number
@@ -20,7 +22,15 @@ interface SearchProviderPayload {
   baseUrl?: unknown
   movieUrlPattern?: unknown
   tvUrlPattern?: unknown
+  movieEmbedPattern?: unknown
+  tvEmbedPattern?: unknown
   active?: unknown
+}
+
+/** A provider's direct embed URLs, for pages whose player cannot be scraped. */
+export interface EmbedRule {
+  movie: string
+  tv: string
 }
 
 const DEFAULT_PATTERNS: Record<MediaType, string> = {
@@ -67,6 +77,15 @@ export async function activeSearchProviders(db: D1Database) {
   return rows.results
 }
 
+/** The embed rule of the provider whose pages `url` belongs to, if it has one. */
+export async function embedRuleFor(db: D1Database, url: string): Promise<EmbedRule | null> {
+  const rows = await db
+    .prepare("SELECT base_url, movie_embed_pattern, tv_embed_pattern FROM search_providers WHERE movie_embed_pattern <> '' OR tv_embed_pattern <> ''")
+    .all<Pick<SearchProviderRow, 'base_url' | 'movie_embed_pattern' | 'tv_embed_pattern'>>()
+  const provider = rows.results.find((row) => row.base_url && url.startsWith(row.base_url.replace(/\/$/, '')))
+  return provider ? { movie: provider.movie_embed_pattern, tv: provider.tv_embed_pattern } : null
+}
+
 /** One playable source per active provider, pointing at that provider's page for the title. */
 export function dynamicSourcesFor(providers: SearchProviderRow[], mediaType: MediaType, tmdbId: number, title: string) {
   return providers.map((provider) => ({
@@ -111,14 +130,19 @@ function cleanSearchProvider(input: SearchProviderPayload) {
   const baseUrl = trimmedString(input.baseUrl, 500)
   const movieUrlPattern = trimmedString(input.movieUrlPattern, 500)
   const tvUrlPattern = trimmedString(input.tvUrlPattern, 500)
+  const movieEmbedPattern = trimmedString(input.movieEmbedPattern, 500)
+  const tvEmbedPattern = trimmedString(input.tvEmbedPattern, 500)
   const active = input.active === undefined ? true : input.active
 
   if (!label) fieldErrors.label = 'Enter a label.'
   if (!baseUrl) fieldErrors.baseUrl = 'Enter a base URL.'
   if (typeof active !== 'boolean') fieldErrors.active = 'Active must be true or false.'
+  for (const [field, pattern] of [['movieEmbedPattern', movieEmbedPattern], ['tvEmbedPattern', tvEmbedPattern]]) {
+    if (pattern && !pattern.startsWith('https://')) fieldErrors[field] = 'Use an HTTPS URL, or leave empty.'
+  }
   assertNoFieldErrors(fieldErrors, 'Check search provider fields.')
 
-  return { label, baseUrl, movieUrlPattern, tvUrlPattern, active: active as boolean }
+  return { label, baseUrl, movieUrlPattern, tvUrlPattern, movieEmbedPattern, tvEmbedPattern, active: active as boolean }
 }
 
 function publicSearchProvider(row: SearchProviderRow) {
@@ -128,6 +152,8 @@ function publicSearchProvider(row: SearchProviderRow) {
     baseUrl: row.base_url,
     movieUrlPattern: row.movie_url_pattern,
     tvUrlPattern: row.tv_url_pattern,
+    movieEmbedPattern: row.movie_embed_pattern,
+    tvEmbedPattern: row.tv_embed_pattern,
     active: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -160,10 +186,22 @@ export async function createSearchProvider(request: Request, env: Env) {
   await env.DB
     .prepare(
       `INSERT INTO search_providers
-        (id, label, base_url, movie_url_pattern, tv_url_pattern, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, label, base_url, movie_url_pattern, tv_url_pattern, movie_embed_pattern, tv_embed_pattern,
+         is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, provider.label, provider.baseUrl, provider.movieUrlPattern, provider.tvUrlPattern, provider.active ? 1 : 0, now, now)
+    .bind(
+      id,
+      provider.label,
+      provider.baseUrl,
+      provider.movieUrlPattern,
+      provider.tvUrlPattern,
+      provider.movieEmbedPattern,
+      provider.tvEmbedPattern,
+      provider.active ? 1 : 0,
+      now,
+      now,
+    )
     .run()
 
   await auditAdminEvent(request, env, 'search_provider.create', null, { searchProviderId: id, label: provider.label })
@@ -179,16 +217,29 @@ export async function updateSearchProvider(request: Request, env: Env, id: strin
     baseUrl: current.base_url,
     movieUrlPattern: current.movie_url_pattern,
     tvUrlPattern: current.tv_url_pattern,
+    movieEmbedPattern: current.movie_embed_pattern,
+    tvEmbedPattern: current.tv_embed_pattern,
     active: current.is_active === 1,
     ...changes,
   })
   await env.DB
     .prepare(
       `UPDATE search_providers SET
-        label = ?, base_url = ?, movie_url_pattern = ?, tv_url_pattern = ?, is_active = ?, updated_at = ?
+        label = ?, base_url = ?, movie_url_pattern = ?, tv_url_pattern = ?,
+        movie_embed_pattern = ?, tv_embed_pattern = ?, is_active = ?, updated_at = ?
        WHERE id = ?`,
     )
-    .bind(provider.label, provider.baseUrl, provider.movieUrlPattern, provider.tvUrlPattern, provider.active ? 1 : 0, Date.now(), id)
+    .bind(
+      provider.label,
+      provider.baseUrl,
+      provider.movieUrlPattern,
+      provider.tvUrlPattern,
+      provider.movieEmbedPattern,
+      provider.tvEmbedPattern,
+      provider.active ? 1 : 0,
+      Date.now(),
+      id,
+    )
     .run()
 
   await auditAdminEvent(request, env, 'search_provider.update', null, { searchProviderId: id, label: provider.label })

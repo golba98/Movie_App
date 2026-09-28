@@ -109,6 +109,48 @@ describe('authorised media-source catalog', () => {
     }
   })
 
+  it('resolves provider pages through their configured embed patterns', async () => {
+    const { admin, viewer } = await activeViewerCookies()
+    const created = await request('/api/admin/search-providers', {
+      method: 'POST',
+      cookie: admin,
+      origin,
+      body: {
+        label: 'Embed provider',
+        baseUrl: 'https://embed-provider.example.test',
+        movieEmbedPattern: 'https://embeds.example.test/movie/{tmdbId}',
+        tvEmbedPattern: 'https://embeds.example.test/tv/{tmdbId}/{season}/{episode}',
+      },
+    })
+    expect(created.status).toBe(201)
+
+    const invalid = await request('/api/admin/search-providers', {
+      method: 'POST',
+      cookie: admin,
+      origin,
+      body: { label: 'Plain HTTP', baseUrl: 'https://plain.example.test', movieEmbedPattern: 'http://embeds.example.test/{tmdbId}' },
+    })
+    expect(invalid.status).toBe(400)
+
+    // Only the embed-policy probe may reach the network; the provider page is never scraped.
+    const outbound = vi.fn<(input: RequestInfo | URL) => Promise<Response>>(async () => new Response('', { status: 200 }))
+    vi.stubGlobal('fetch', outbound)
+    try {
+      const extract = async (url: string) => {
+        const response = await request(`/api/media-sources/extract?url=${encodeURIComponent(url)}`, { cookie: viewer })
+        return ((await response.json()) as { data: { extractedUrl: string | null } }).data.extractedUrl
+      }
+      expect(await extract('https://embed-provider.example.test/movie/27205/inception/watch'))
+        .toBe('https://embeds.example.test/movie/27205')
+      expect(await extract('https://embed-provider.example.test/tv/1399/game-of-thrones/season/2?e=5'))
+        .toBe('https://embeds.example.test/tv/1399/2/5')
+      const fetched = outbound.mock.calls.map(([input]) => String(input))
+      expect(fetched.some((url) => url.includes('embed-provider.example.test'))).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('runs independent dynamic player resolutions concurrently', async () => {
     let inFlight = 0
     let maxInFlight = 0

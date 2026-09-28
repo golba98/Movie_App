@@ -43,7 +43,9 @@ npm run db:migrate:local
 npm start
 ```
 
-`npm start` launches the development server and opens Fedora Movies in the default browser. Use `npm run dev` when you want the server without opening a browser automatically.
+`npm start` launches the development server and opens Fedora Movies in the default browser. Use `npm run dev` when you want the server without opening a browser automatically. Both listen on localhost only; use `npm run dev:lan` to reach the dev server from another device on your network.
+
+For local testing, the Worker creates a `tester` account (password `tester-password-123`) the first time it serves a request on `localhost` or `127.0.0.1`. Deployed Workers never create it.
 
 The Worker fails closed when its secrets are absent. For local development, create an ignored `.dev.vars` file containing `ADMIN_PASSWORD`, `TMDB_ACCESS_TOKEN`, and `WATCH_PARTY_SIGNING_SECRET`. No password or token value is committed to this repository.
 
@@ -59,7 +61,7 @@ Open the URL printed by Vite, then visit `/admin` to sign in and create the firs
 
 Use the **Authorised media catalog** in `/admin` to associate a direct MP4 or WebM URL with a TMDB movie or TV episode. Sources may be a same-origin path or an HTTPS URL. A remote media host must provide a browser-compatible codec, correct content type, and byte-range support; Fedora Movies deliberately does not proxy remote video.
 
-Optional dynamic search providers are configured separately in `/admin`. The Worker checks the configured provider and resolves its external embed only after the viewer presses **Play**. The player stays dark while the external frame prepares, loads inline first, and can then expand to Theater mode without restarting. The raw provider page is not embedded; the frame is sandboxed and cannot use its own fullscreen permission.
+Optional dynamic search providers are configured separately in `/admin`. A provider's label is what viewers see on its source button. Providers that build their player in the browser can set movie and TV embed patterns (`{tmdbId}`, `{season}`, `{episode}`); the Worker then uses that embed URL instead of scraping the provider's page. The Worker checks the configured provider and resolves its external embed only after the viewer presses **Play**. The player stays dark while the external frame prepares, loads inline first, and can then expand to Theater mode without restarting. The raw provider page is not embedded; the frame is sandboxed and cannot use its own fullscreen permission.
 
 The player:
 

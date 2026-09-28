@@ -1,7 +1,7 @@
 import { UserPlus } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import type { NewAccountInput } from './api'
-import { expiryValue, MIN_EXPIRY_DATE } from './expiry'
+import { expiryValue, minExpiryDate } from './expiry'
 import { PasswordInput } from './ui/PasswordInput'
 
 const EMPTY_FORM = { username: '', displayName: '', temporaryPassword: '', expiresAt: '' }
@@ -60,7 +60,7 @@ export function CreateAccountForm({ creating, onCreate }: CreateAccountFormProps
         <label className="text-sm text-zinc-300">Expiry (optional)
           <input
             type="date"
-            min={MIN_EXPIRY_DATE}
+            min={minExpiryDate()}
             value={form.expiresAt}
             onChange={(event) => update('expiresAt')(event.target.value)}
             className="form-input mt-2"

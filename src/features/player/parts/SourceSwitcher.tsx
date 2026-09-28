@@ -16,9 +16,10 @@ export function SourceSwitcher({ sources, activeSourceId, onSelect }: SourceSwit
           key={source.id}
           type="button"
           onClick={() => onSelect(source.id)}
+          aria-pressed={activeSourceId === source.id}
           className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 pointer-coarse:min-h-11 ${
             activeSourceId === source.id
-              ? 'bg-brand-400 border border-brand-400 text-ink-950 shadow-md shadow-brand-400/10 active-bg-emerald-500'
+              ? 'bg-brand-400 border border-brand-400 text-ink-950 shadow-md shadow-brand-400/10'
               : 'bg-white/5 border border-white/5 text-zinc-400 hover:bg-white/10 hover:border-white/10 hover:text-zinc-200'
           }`}
         >

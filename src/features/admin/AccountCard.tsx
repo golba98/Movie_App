@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { formatDateTime } from '../../lib/format'
 import type { ViewerAccount } from '../../types/account'
 import type { AccountChanges } from './api'
-import { dateInputValue, expiryValue, MIN_EXPIRY_DATE } from './expiry'
+import { dateInputValue, expiryValue, minExpiryDate } from './expiry'
 import { StatusPill } from './ui/StatusPill'
 
 interface AccountCardProps {
@@ -46,7 +46,7 @@ export function AccountCard({ account, busy, onSave, onReset, onRevoke, onDelete
           <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={80} className="form-input mt-2" />
         </label>
         <label className="text-sm text-zinc-300">Account expiry
-          <input type="date" min={MIN_EXPIRY_DATE} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} className="form-input mt-2" />
+          <input type="date" min={minExpiryDate()} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} className="form-input mt-2" />
         </label>
       </div>
 

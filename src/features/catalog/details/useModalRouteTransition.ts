@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router'
 
 // Matches the panel's fade-out, so navigation happens once it has finished.
 const CLOSE_DELAY_MS = 200
@@ -11,13 +11,19 @@ const CLOSE_DELAY_MS = 200
  */
 export function useModalRouteTransition(escapeDisabled: boolean) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [mounted, setMounted] = useState(false)
   const [closing, setClosing] = useState(false)
+  const closeTimerRef = useRef<number | null>(null)
+  // Opened over another page (a link passed its location as the background).
+  const openedOverPage = Boolean((location.state as { backgroundLocation?: unknown } | null)?.backgroundLocation)
 
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      document.body.style.overflow = ''
+      document.body.style.overflow = previousOverflow
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current)
     }
   }, [])
 
@@ -25,14 +31,16 @@ export function useModalRouteTransition(escapeDisabled: boolean) {
     setMounted(true)
   }, [])
 
+  // Back to the page underneath, or home when the details URL was opened directly.
   const close = useCallback(() => {
     setClosing(true)
-    setTimeout(() => {
-      // Opened over another page: go back to it. Opened directly: go home.
-      if (window.history.state?.usr?.backgroundLocation) navigate(-1)
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      if (openedOverPage) navigate(-1)
       else navigate('/')
     }, CLOSE_DELAY_MS)
-  }, [navigate])
+  }, [navigate, openedOverPage])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

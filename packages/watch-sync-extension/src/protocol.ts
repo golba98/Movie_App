@@ -1,14 +1,9 @@
 // Constants and guards shared by the background worker, the content scripts
 // and the manifest. Must stay free of chrome.* calls so any context can import it.
+import trustedOrigins from '../trusted-origins.json'
 
-// Pages allowed to hand the extension a room connection.
-export const TRUSTED_APP_ORIGINS = [
-  'https://movie-app.jordanvorster404.workers.dev',
-  'http://127.0.0.1:4173',
-  'http://localhost:4173',
-  'http://127.0.0.1:5173',
-  'http://localhost:5173',
-]
+// Pages allowed to hand the extension a room connection; configured in trusted-origins.json.
+export const TRUSTED_APP_ORIGINS: readonly string[] = trustedOrigins.origins
 
 // The window.postMessage protocol spoken with the website (see src/features/watch-party/extension-bridge.ts).
 export const BRIDGE_VERSION = 1

@@ -1,4 +1,5 @@
 import type { PlaybackKind } from '../../src/types/watch-party'
+import { embedRuleFor, type EmbedRule } from './search-providers'
 
 const EXTRACTOR_REQUEST_TIMEOUT_MS = 12_000
 const CACHE_TTL_MS = 10 * 60 * 1_000
@@ -29,15 +30,15 @@ export function classifyPlaybackKind(url: string): PlaybackKind {
   return 'embed'
 }
 
-// Known dynamic hosts render their player client-side, so their pages are
-// mapped straight to the matching vidsrc embed instead of being scraped.
-function knownHostEmbed(url: string) {
-  if (!url.includes('flixbaba') && !url.includes('soap2day')) return null
-  const movieMatch = url.match(/\/movie\/(\d+)/)
-  if (movieMatch && !url.includes('/season/')) return `https://vidsrc.to/embed/movie/${movieMatch[1]}`
-
-  const tvMatch = url.match(/\/tv\/(\d+)/)
-  if (!tvMatch) return null
+// Builds a provider's configured embed URL from the ids in one of its page URLs,
+// e.g. /movie/<id>, or /tv/<id>/season/<n>?e=<n>.
+function providerEmbed(url: string, rule: EmbedRule) {
+  const movieId = url.match(/\/movie\/(\d+)/)?.[1]
+  if (movieId && !url.includes('/season/')) {
+    return rule.movie ? rule.movie.replace(/{tmdbId}/g, movieId) : null
+  }
+  const showId = url.match(/\/tv\/(\d+)/)?.[1]
+  if (!showId || !rule.tv) return null
   const season = url.match(/\/season\/(\d+)/)?.[1] ?? '1'
   const episodeFromPath = () => url.match(/\/episode\/(\d+)/)?.[1]
   let episode = '1'
@@ -48,13 +49,17 @@ function knownHostEmbed(url: string) {
   } catch {
     episode = episodeFromPath() ?? episode
   }
-  return `https://vidsrc.to/embed/tv/${tvMatch[1]}/${season}/${episode}`
+  return rule.tv.replace(/{tmdbId}/g, showId).replace(/{season}/g, season).replace(/{episode}/g, episode)
 }
 
-/** Finds the player inside a provider's watch page, preferring a directly playable stream. */
-export async function extractDirectPlayerUrl(url: string, signal: AbortSignal): Promise<string | null> {
-  const known = knownHostEmbed(url)
-  if (known) return known
+/**
+ * Finds the player for a provider's watch page: the provider's configured
+ * embed URL when it has one, otherwise the page is scraped, preferring a
+ * directly playable stream.
+ */
+export async function extractDirectPlayerUrl(url: string, signal: AbortSignal, rule: EmbedRule | null = null): Promise<string | null> {
+  const embed = rule ? providerEmbed(url, rule) : null
+  if (embed) return embed
 
   try {
     const response = await fetch(url, { method: 'GET', signal, headers: { 'User-Agent': BROWSER_USER_AGENT } })
@@ -95,7 +100,8 @@ export async function resolveAndCachePlayerUrl(db: D1Database, sourceUrl: string
   if (existing) return existing
 
   const resolution = (async () => {
-    const extractedUrl = await extractDirectPlayerUrl(sourceUrl, AbortSignal.timeout(EXTRACTOR_REQUEST_TIMEOUT_MS))
+    const rule = await embedRuleFor(db, sourceUrl)
+    const extractedUrl = await extractDirectPlayerUrl(sourceUrl, AbortSignal.timeout(EXTRACTOR_REQUEST_TIMEOUT_MS), rule)
     if (!extractedUrl) return null
 
     const now = Date.now()

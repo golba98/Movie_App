@@ -34,18 +34,13 @@ export function withoutSource(states: SourceStates, sourceId: string) {
   return next
 }
 
+// The Worker labels dynamic sources "<provider label> Stream (Dynamic)"; viewers see the provider label.
 export function getSourceLabel(source: Pick<MediaSource, 'label'>) {
-  const label = source.label.replace(' Stream (Dynamic)', '')
-  const lowered = label.toLowerCase()
-  if (lowered.includes('flixbaba')) return 'Source 1'
-  if (lowered.includes('soap2day')) return 'Source 2'
-  return label
+  return source.label.replace(' Stream (Dynamic)', '')
 }
 
 export function isDynamicSource(source: MediaSource | undefined) {
-  if (!source) return false
-  const sourceUrl = source.sourceUrl.toLowerCase()
-  return Boolean(source.isDynamic || sourceUrl.includes('flixbaba') || sourceUrl.includes('soap2day'))
+  return Boolean(source?.isDynamic)
 }
 
 /** An extracted player is usable only if it is HTTPS and not the wrapper page itself. */

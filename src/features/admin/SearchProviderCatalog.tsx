@@ -13,11 +13,14 @@ const EMPTY_DRAFT: SearchProviderInput = {
   baseUrl: '',
   movieUrlPattern: '',
   tvUrlPattern: '',
+  movieEmbedPattern: '',
+  tvEmbedPattern: '',
   active: true,
 }
 
-function draftFromProvider({ label, baseUrl, movieUrlPattern, tvUrlPattern, active }: SearchProvider): SearchProviderInput {
-  return { label, baseUrl, movieUrlPattern, tvUrlPattern, active }
+function draftFromProvider(provider: SearchProvider): SearchProviderInput {
+  const { label, baseUrl, movieUrlPattern, tvUrlPattern, movieEmbedPattern, tvEmbedPattern, active } = provider
+  return { label, baseUrl, movieUrlPattern, tvUrlPattern, movieEmbedPattern, tvEmbedPattern, active }
 }
 
 function ProviderFields({ draft, onChange }: { draft: SearchProviderInput; onChange: (draft: SearchProviderInput) => void }) {
@@ -26,10 +29,10 @@ function ProviderFields({ draft, onChange }: { draft: SearchProviderInput; onCha
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       <label className="text-sm text-zinc-300">Provider label
-        <input required maxLength={160} value={draft.label} onChange={(event) => update('label', event.target.value)} className="form-input mt-2" placeholder="Flixbaba" />
+        <input required maxLength={160} value={draft.label} onChange={(event) => update('label', event.target.value)} className="form-input mt-2" placeholder="Source 1" />
       </label>
       <label className="text-sm text-zinc-300">Base URL
-        <input required maxLength={500} value={draft.baseUrl} onChange={(event) => update('baseUrl', event.target.value)} className="form-input mt-2" placeholder="https://flixbaba.mov" />
+        <input required maxLength={500} value={draft.baseUrl} onChange={(event) => update('baseUrl', event.target.value)} className="form-input mt-2" placeholder="https://provider.example" />
       </label>
       <label className="text-sm text-zinc-300">Movie URL pattern
         <input
@@ -49,6 +52,27 @@ function ProviderFields({ draft, onChange }: { draft: SearchProviderInput; onCha
           placeholder="{baseUrl}/tv/{tmdbId}/{slug}"
         />
       </label>
+      <label className="text-sm text-zinc-300 md:col-span-2">Movie embed pattern (optional)
+        <input
+          maxLength={500}
+          value={draft.movieEmbedPattern}
+          onChange={(event) => update('movieEmbedPattern', event.target.value)}
+          className="form-input mt-2"
+          placeholder="https://player.example/embed/movie/{tmdbId}"
+        />
+      </label>
+      <label className="text-sm text-zinc-300 md:col-span-2">TV embed pattern (optional)
+        <input
+          maxLength={500}
+          value={draft.tvEmbedPattern}
+          onChange={(event) => update('tvEmbedPattern', event.target.value)}
+          className="form-input mt-2"
+          placeholder="https://player.example/embed/tv/{tmdbId}/{season}/{episode}"
+        />
+      </label>
+      <p className="text-xs leading-5 text-zinc-500 md:col-span-2 xl:col-span-4">
+        Embed patterns are used instead of scraping the provider's page, for sites that build their player in the browser.
+      </p>
       <label className="inline-flex min-h-12 cursor-pointer items-center gap-3 text-sm font-medium md:col-span-2 xl:col-span-4">
         <input type="checkbox" checked={draft.active} onChange={(event) => update('active', event.target.checked)} className="size-5 accent-white" />
         Provider is active and used for video searches

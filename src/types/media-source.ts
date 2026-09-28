@@ -42,12 +42,15 @@ export interface MediaSourceInput {
   active: boolean
 }
 
+/** A website the Worker builds dynamic sources from, as the admin API returns it. */
 export interface SearchProvider {
   id: string
   label: string
   baseUrl: string
   movieUrlPattern: string
   tvUrlPattern: string
+  movieEmbedPattern: string
+  tvEmbedPattern: string
   active: boolean
   createdAt: number
   updatedAt: number
@@ -58,5 +61,8 @@ export interface SearchProviderInput {
   baseUrl: string
   movieUrlPattern: string
   tvUrlPattern: string
+  // Direct embed URLs for providers whose pages can't be scraped; empty to scrape.
+  movieEmbedPattern: string
+  tvEmbedPattern: string
   active: boolean
 }
