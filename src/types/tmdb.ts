@@ -121,10 +121,6 @@ export interface TvDetails extends AppendedDetails {
   genres?: Genre[]
 }
 
-export interface FavouriteItem extends MediaItem {
-  addedAt: number
-}
-
 export interface Episode {
   id: number
   name: string

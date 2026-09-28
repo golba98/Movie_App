@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Fedora Movies is a React 19, TypeScript, and Vite single-page application. Application code lives in `src/`: route-level views are in `src/pages/`, reusable UI in `src/components/`, TMDB requests in `src/api/`, shared state and request logic in `src/hooks/`, data contracts in `src/types/`, and formatting or normalization helpers in `src/utils/`. Global styling is in `src/index.css`. Static files belong in `public/`; production output is generated in `dist/` and should not be edited. Playwright end-to-end tests live in `tests/`.
+Fedora Movies is a React 19, TypeScript, and Vite single-page application with a Cloudflare Worker API. Application code lives in `src/`, organised by feature: each folder in `src/features/` (`admin`, `auth`, `catalog`, `favourites`, `player`, `watch-history`, `watch-party`) holds that feature's pages, components, hooks and `api.ts` client. Shared UI is in `src/components/` (`layout/`, `ui/`), generic hooks in `src/hooks/`, framework-free helpers in `src/lib/`, and data contracts shared with the Worker and extension in `src/types/`. Global styling is in `src/index.css`. The Worker lives in `worker/`, also grouped by feature. Static files belong in `public/`; production output is generated in `dist/` and should not be edited. Playwright end-to-end tests live in `tests/`, with shared fixtures and mocks in `tests/support/`.
 
 ## Build, Test, and Development Commands
 
@@ -16,7 +16,7 @@ Fedora Movies is a React 19, TypeScript, and Vite single-page application. Appli
 
 ## Coding Style & Naming Conventions
 
-Follow the existing style: two-space indentation, single quotes, no semicolons, and trailing commas in multiline structures. Use `PascalCase` for components and page files (`MediaCard.tsx`), `camelCase` for functions and variables, and `useX` for hooks. Keep shared TMDB shapes in `src/types/tmdb.ts`; avoid duplicating response types. Prefer small functional components, semantic HTML, accessible labels, and explicit loading, empty, and error states. ESLint and the strict `tsconfig.json` are authoritative.
+Follow the existing style: two-space indentation, single quotes, no semicolons, and trailing commas in multiline structures. Use `PascalCase` for components and page files (`MediaCard.tsx`), `useX` for hooks, and kebab-case for every other module (`history-state.ts`); use `camelCase` for functions and variables. Context providers live in `XProvider.tsx` with their hook in a separate `x-context.ts`, so files export only components or only non-components. Keep shared TMDB shapes in `src/types/tmdb.ts`; avoid duplicating response types. Prefer small functional components, semantic HTML, accessible labels, and explicit loading, empty, and error states. ESLint and the strict `tsconfig.json` are authoritative.
 
 ## Testing Guidelines
 

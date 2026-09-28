@@ -1,14 +1,13 @@
 import { AlertTriangle, RotateCcw } from 'lucide-react'
 
-export function ErrorMessage({
-  message,
-  onRetry,
-  compact = false,
-}: {
+interface ErrorMessageProps {
   message: string
+  // Shows a "Try again" button when provided.
   onRetry?: () => void
   compact?: boolean
-}) {
+}
+
+export function ErrorMessage({ message, onRetry, compact = false }: ErrorMessageProps) {
   return (
     <div
       role="alert"

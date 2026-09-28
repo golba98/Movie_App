@@ -2,10 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import App from './App'
-import { AppErrorBoundary } from './components/layout/AppErrorBoundary'
-import { AuthProvider } from './hooks/useAuth'
-import { FavouritesProvider } from './hooks/useFavourites'
-import { WatchedHistoryProvider } from './hooks/useWatchedHistory'
+import { AppErrorBoundary } from './app/AppErrorBoundary'
+import { AuthProvider } from './features/auth/AuthProvider'
+import { FavouritesProvider } from './features/favourites/FavouritesProvider'
+import { WatchHistoryProvider } from './features/watch-history/WatchHistoryProvider'
 import './index.css'
 
 createRoot(document.getElementById('root')!).render(
@@ -13,11 +13,11 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <AuthProvider>
         <FavouritesProvider>
-          <WatchedHistoryProvider>
+          <WatchHistoryProvider>
             <AppErrorBoundary>
               <App />
             </AppErrorBoundary>
-          </WatchedHistoryProvider>
+          </WatchHistoryProvider>
         </FavouritesProvider>
       </AuthProvider>
     </BrowserRouter>

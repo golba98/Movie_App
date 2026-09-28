@@ -26,6 +26,7 @@ export interface ScoredCandidate<T = unknown> {
   value: T
 }
 
+/** How likely a <video> is to be the main player: large, visible, playing and long score highest. */
 export function scoreVideo(signals: VideoSignals, hasLongCandidate: boolean) {
   if (!signals.connected || !signals.cssVisible || signals.width <= 0 || signals.height <= 0) {
     return { score: Number.NEGATIVE_INFINITY, eligible: false }
@@ -45,6 +46,7 @@ export function scoreVideo(signals: VideoSignals, hasLongCandidate: boolean) {
   return { score: Math.round(score * 100) / 100, eligible: true }
 }
 
+/** Keeps a manual choice while it exists; otherwise picks only an unambiguous leader. */
 export function chooseCandidate<T>(
   candidates: ScoredCandidate<T>[],
   manual: { id: string; fingerprint: string } | null,
@@ -61,6 +63,7 @@ export function chooseCandidate<T>(
   return { selected: null, ambiguous: eligible.length > 1, reason: eligible.length ? 'ambiguous' as const : 'unavailable' as const }
 }
 
+/** A short, stable id for a video across rescans, from its position, size and length (FNV-1a). */
 export function mediaFingerprint(input: {
   domPosition: string
   mediaIndex: number

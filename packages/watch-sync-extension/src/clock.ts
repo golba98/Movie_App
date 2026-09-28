@@ -3,6 +3,10 @@ interface ClockSample {
   offsetMs: number
 }
 
+/**
+ * Estimates the server clock offset from sync round-trips: the median of the
+ * three lowest-latency of the last eight samples.
+ */
 export class ClockEstimator {
   private samples: ClockSample[] = []
 
@@ -29,6 +33,7 @@ export class ClockEstimator {
   }
 }
 
+/** Wall-clock milliseconds from the monotonic clock, immune to system clock jumps mid-session. */
 export function localEpochMs() {
   return performance.timeOrigin + performance.now()
 }

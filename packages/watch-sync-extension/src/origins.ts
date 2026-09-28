@@ -13,6 +13,7 @@ export function originPattern(origin: string) {
   return normalized ? `${normalized}/*` : null
 }
 
+/** The tab's own origin and the distinct origins of its embedded frames. */
 export function discoverFrameOrigins(frames: { frameId: number; url: string }[]) {
   let topOrigin: string | null = null
   const embedded = new Set<string>()

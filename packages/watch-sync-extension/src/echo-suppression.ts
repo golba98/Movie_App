@@ -11,6 +11,10 @@ interface RemoteOperation {
   deadlineMs: number
 }
 
+/**
+ * Recognises the media events caused by applying a remote change, so they are
+ * not mistaken for the viewer acting and sent back to the room.
+ */
 export class EchoSuppressor {
   private operation: RemoteOperation | null = null
 

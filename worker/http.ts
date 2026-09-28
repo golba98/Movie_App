@@ -1,3 +1,4 @@
+/** An expected failure, sent to the client as `{ error: { code, message, fieldErrors? } }`. */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -10,6 +11,7 @@ export class ApiError extends Error {
   }
 }
 
+// Every API response is private, uncacheable and inert if loaded as a document.
 const securityHeaders = {
   'Cache-Control': 'no-store',
   'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
@@ -18,12 +20,13 @@ const securityHeaders = {
 } as const
 
 export function json(data: unknown, status = 200, headers?: HeadersInit) {
+  return Response.json({ data }, { status, headers: { ...securityHeaders, ...headers } })
+}
+
+export function notFound() {
   return Response.json(
-    { data },
-    {
-      status,
-      headers: { ...securityHeaders, ...headers },
-    },
+    { error: { code: 'NOT_FOUND', message: 'API route not found.' } },
+    { status: 404, headers: { 'Cache-Control': 'no-store' } },
   )
 }
 
@@ -58,6 +61,7 @@ export async function readJson<T>(request: Request): Promise<T> {
   }
 }
 
+/** Cross-site form posts and fetches are refused; reads are always allowed. */
 export function assertSameOrigin(request: Request) {
   if (request.method === 'GET' || request.method === 'HEAD') return
   const origin = request.headers.get('origin')
@@ -83,6 +87,7 @@ export function parseCookies(request: Request) {
   return cookies
 }
 
+// Local development has no CF-Connecting-IP header.
 export function requestIp(request: Request) {
   return request.headers.get('CF-Connecting-IP') ?? 'local'
 }

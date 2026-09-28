@@ -1,13 +1,58 @@
-import { localEpochMs } from '../clock'
+// Injected into a frame the viewer enabled: finds native <video> elements,
+// reports them to the background worker, and keeps the selected one in step
+// with the room. Injection can repeat, so a second run only rescans.
+import { expectedPlaybackPosition } from '../../../../src/features/watch-party/sync'
 import { AutoplayGate } from '../autoplay'
+import { localEpochMs } from '../clock'
 import { clampSeekTime, commandDelayMs, correctionForDrift, shouldPostponeCorrection } from '../drift'
 import { EchoSuppressor, type MediaEventName } from '../echo-suppression'
-import { chooseCandidate, mediaFingerprint, scoreVideo, type ScoredCandidate, type VideoSignals } from '../scoring'
+import { isRecord } from '../protocol'
 import { RevisionScheduler } from '../revision-scheduler'
+import { chooseCandidate, mediaFingerprint, scoreVideo, type ScoredCandidate, type VideoSignals } from '../scoring'
 import type { AuthoritativeState, InternalMessage, PlaybackCommandMetadata } from '../types'
 
 const controllerKey = '__fedoraMoviesWatchSyncController__'
 const controllerGlobal = globalThis as typeof globalThis & { [controllerKey]?: { rescan: () => void; shutdown: () => void } }
+
+const MEDIA_EVENTS: MediaEventName[] = ['play', 'playing', 'pause', 'seeking', 'seeked', 'ratechange']
+// Snapshots are frequent while playing and occasional while paused.
+const PLAYING_SNAPSHOT_MS = 1_000
+const PAUSED_SNAPSHOT_MS = 5_000
+// Drift small enough to end a rate nudge early.
+const SETTLED_DRIFT_MS = 150
+const SEEK_DRIFT_MS = 250
+const RETRY_WHILE_LOADING_MS = 500
+const RESYNC_AFTER_RATE_RESTORE_MS = 1_000
+const HARD_SEEK_COOLDOWN_MS = 2_000
+// How long, and how closely, a media event must match a remote change to count as its echo.
+const ECHO_WINDOW_MS = 2_500
+const ECHO_POSITION_TOLERANCE_SECONDS = 1.25
+const ECHO_RATE_TOLERANCE = 0.035
+const RECENT_MEDIA_MS = 10_000
+const RECENT_INTERACTION_MS = 15_000
+const DOM_PATH_DEPTH = 8
+
+// A stable description of where an element sits, used in its fingerprint.
+function domPosition(element: Element) {
+  const parts: string[] = []
+  let current: Element | null = element
+  while (current && current !== document.documentElement && parts.length < DOM_PATH_DEPTH) {
+    const parent: Element | null = current.parentElement
+    const tagName = current.tagName
+    const siblings = parent ? Array.from(parent.children).filter((child) => child.tagName === tagName) : []
+    parts.push(`${tagName.toLowerCase()}:${Math.max(0, siblings.indexOf(current))}`)
+    current = parent
+  }
+  return parts.reverse().join('/')
+}
+
+function seekableRanges(video: HTMLVideoElement) {
+  const ranges: { start: number; end: number }[] = []
+  for (let index = 0; index < video.seekable.length; index += 1) {
+    ranges.push({ start: video.seekable.start(index), end: video.seekable.end(index) })
+  }
+  return ranges
+}
 
 function startController() {
   const previous = controllerGlobal[controllerKey]
@@ -39,38 +84,17 @@ function startController() {
     if (active) port.postMessage(message)
   }
 
-  const domPosition = (element: Element) => {
-    const parts: string[] = []
-    let current: Element | null = element
-    while (current && current !== document.documentElement && parts.length < 8) {
-      const parent: Element | null = current.parentElement
-      const siblings: Element[] = parent ? Array.from(parent.children).filter((child: Element) => child.tagName === current!.tagName) : []
-      parts.push(`${current.tagName.toLowerCase()}:${Math.max(0, siblings.indexOf(current))}`)
-      current = parent
-    }
-    return parts.reverse().join('/')
-  }
-
-  const seekableRanges = (video: HTMLVideoElement) => {
-    const ranges: { start: number; end: number }[] = []
-    for (let index = 0; index < video.seekable.length; index += 1) {
-      ranges.push({ start: video.seekable.start(index), end: video.seekable.end(index) })
-    }
-    return ranges
-  }
-
   const selectedVideo = () => selectedFingerprint ? fingerprintToVideo.get(selectedFingerprint) ?? null : null
 
   const snapshot = () => {
     const video = selectedVideo()
     if (!video) return
     const expectedPositionMs = latestState
-      ? latestState.playbackState === 'playing'
-        ? latestState.positionMs + Math.max(0, localEpochMs() + latestClockOffsetMs - latestState.stateUpdatedAt) * latestState.playbackRate
-        : latestState.positionMs
+      ? expectedPlaybackPosition(latestState, localEpochMs() + latestClockOffsetMs)
       : video.currentTime * 1_000
     const driftMs = expectedPositionMs - video.currentTime * 1_000
-    if (latestState && rateRestore !== null && Math.abs(driftMs) <= 150) {
+    // Back in step before the rate nudge ended: restore the room's rate now.
+    if (latestState && rateRestore !== null && Math.abs(driftMs) <= SETTLED_DRIFT_MS) {
       window.clearTimeout(rateRestore)
       rateRestore = null
       suppressor.begin({
@@ -79,14 +103,14 @@ function startController() {
         expectedPaused: video.paused,
         expectedPositionSeconds: video.currentTime,
         expectedRate: latestState.playbackRate,
-        positionToleranceSeconds: 1.25,
-        rateTolerance: 0.035,
-        deadlineMs: localEpochMs() + 2_500,
+        positionToleranceSeconds: ECHO_POSITION_TOLERANCE_SECONDS,
+        rateTolerance: ECHO_RATE_TOLERANCE,
+        deadlineMs: localEpochMs() + ECHO_WINDOW_MS,
       })
       video.playbackRate = latestState.playbackRate
       window.setTimeout(() => {
         if (latestState) applyRemote(latestState, undefined, latestClockOffsetMs)
-      }, 1_000)
+      }, RESYNC_AFTER_RATE_RESTORE_MS)
     }
     safePost({
       type: 'frame:snapshot',
@@ -105,9 +129,10 @@ function startController() {
     snapshotTimer = window.setTimeout(() => {
       snapshot()
       scheduleSnapshot()
-    }, video && !video.paused ? 1_000 : 5_000)
+    }, video && !video.paused ? PLAYING_SNAPSHOT_MS : PAUSED_SNAPSHOT_MS)
   }
 
+  // A media event the viewer caused becomes a room request; echoes of remote changes are swallowed.
   const localIntent = (event: MediaEventName, video: HTMLVideoElement) => {
     if (video !== selectedVideo()) return
     recentMedia.set(video, performance.now())
@@ -123,13 +148,26 @@ function startController() {
   const observeVideo = (video: HTMLVideoElement) => {
     if (observed.has(video)) return
     observed.add(video)
-    for (const eventName of ['play', 'playing', 'pause', 'seeking', 'seeked', 'ratechange'] as MediaEventName[]) {
+    for (const eventName of MEDIA_EVENTS) {
       video.addEventListener(eventName, () => localIntent(eventName, video))
     }
-    video.addEventListener('waiting', () => { waiting = true; snapshot() })
-    video.addEventListener('stalled', () => { stalled = true; snapshot() })
-    video.addEventListener('canplay', () => { waiting = false; stalled = false; snapshot() })
-    video.addEventListener('playing', () => { waiting = false; stalled = false })
+    video.addEventListener('waiting', () => {
+      waiting = true
+      snapshot()
+    })
+    video.addEventListener('stalled', () => {
+      stalled = true
+      snapshot()
+    })
+    video.addEventListener('canplay', () => {
+      waiting = false
+      stalled = false
+      snapshot()
+    })
+    video.addEventListener('playing', () => {
+      waiting = false
+      stalled = false
+    })
   }
 
   const signalsFor = (video: HTMLVideoElement): VideoSignals => {
@@ -149,8 +187,8 @@ function startController() {
       readyState: video.readyState,
       hasCurrentSource: Boolean(video.currentSrc || video.getAttribute('src') || video.querySelector('source')),
       paused: video.paused,
-      recentMediaEvent: performance.now() - (recentMedia.get(video) ?? Number.NEGATIVE_INFINITY) < 10_000,
-      recentInteraction: performance.now() - (recentInteraction.get(video) ?? Number.NEGATIVE_INFINITY) < 15_000,
+      recentMediaEvent: performance.now() - (recentMedia.get(video) ?? Number.NEGATIVE_INFINITY) < RECENT_MEDIA_MS,
+      recentInteraction: performance.now() - (recentInteraction.get(video) ?? Number.NEGATIVE_INFINITY) < RECENT_INTERACTION_MS,
       muted: video.muted,
       loop: video.loop,
       autoplay: video.autoplay,
@@ -212,11 +250,12 @@ function startController() {
     expectedPaused: state.playbackState !== 'playing',
     expectedPositionSeconds: desiredSeconds,
     expectedRate,
-    positionToleranceSeconds: 1.25,
-    rateTolerance: 0.035,
-    deadlineMs: localEpochMs() + 2_500,
+    positionToleranceSeconds: ECHO_POSITION_TOLERANCE_SECONDS,
+    rateTolerance: ECHO_RATE_TOLERANCE,
+    deadlineMs: localEpochMs() + ECHO_WINDOW_MS,
   })
 
+  // Moves the selected video to the room's state, at the command's scheduled time.
   const applyRemote = (state: AuthoritativeState, command: PlaybackCommandMetadata | undefined, clockOffsetMs: number) => {
     const video = selectedVideo()
     if (!video || state.revision < latestRevision) return
@@ -228,12 +267,11 @@ function startController() {
     const execute = () => {
       if (!active || state.revision !== latestRevision) return
       const serverAtExecution = localEpochMs() + clockOffsetMs
-      const desiredMs = state.playbackState === 'playing'
-        ? state.positionMs + Math.max(0, serverAtExecution - state.stateUpdatedAt) * state.playbackRate
-        : state.positionMs
+      const desiredMs = expectedPlaybackPosition(state, serverAtExecution)
       const desiredSeconds = clampSeekTime(desiredMs / 1_000, video.duration, seekableRanges(video))
       if (shouldPostponeCorrection({ waiting, stalled, seeking: video.seeking, readyState: video.readyState })) {
-        window.setTimeout(() => applyRemote(state, { reason: 'recovery', executeAtServerMs: serverAtExecution + 500 }, clockOffsetMs), 500)
+        const retry = { reason: 'recovery' as const, executeAtServerMs: serverAtExecution + RETRY_WHILE_LOADING_MS }
+        window.setTimeout(() => applyRemote(state, retry, clockOffsetMs), RETRY_WHILE_LOADING_MS)
         return
       }
       const driftMs = (desiredSeconds - video.currentTime) * 1_000
@@ -241,16 +279,17 @@ function startController() {
         ready: video.readyState >= 2,
         playing: state.playbackState === 'playing',
         explicit,
-        hardSeekCoolingDown: !explicit && performance.now() - lastHardSeekAt < 2_000,
+        hardSeekCoolingDown: !explicit && performance.now() - lastHardSeekAt < HARD_SEEK_COOLDOWN_MS,
       })
       if (state.playbackState !== 'playing') {
         const expectedEvents: MediaEventName[] = []
         if (!video.paused) expectedEvents.push('pause')
-        if (Math.abs(driftMs) > 250 || explicit) expectedEvents.push('seeking', 'seeked')
+        const needsSeek = Math.abs(driftMs) > SEEK_DRIFT_MS || explicit
+        if (needsSeek) expectedEvents.push('seeking', 'seeked')
         if (Math.abs(video.playbackRate - state.playbackRate) > 0.001) expectedEvents.push('ratechange')
         if (expectedEvents.length) beginSuppression(state, desiredSeconds, expectedEvents, state.playbackRate)
         video.pause()
-        if (Math.abs(driftMs) > 250 || explicit) video.currentTime = desiredSeconds
+        if (needsSeek) video.currentTime = desiredSeconds
         video.playbackRate = state.playbackRate
         return
       }
@@ -268,7 +307,7 @@ function startController() {
           beginSuppression(state, video.currentTime, ['ratechange'], state.playbackRate)
           video.playbackRate = state.playbackRate
           rateRestore = null
-          window.setTimeout(() => applyRemote(state, undefined, clockOffsetMs), 1_000)
+          window.setTimeout(() => applyRemote(state, undefined, clockOffsetMs), RESYNC_AFTER_RATE_RESTORE_MS)
         }, correction.restoreAfterMs)
       } else if (correction.kind === 'none') {
         if (rateRestore !== null) window.clearTimeout(rateRestore)
@@ -309,7 +348,7 @@ function startController() {
   document.addEventListener('keydown', (event) => autoplayGate.activate(event.isTrusted), true)
 
   port.onMessage.addListener((message: unknown) => {
-    if (!message || typeof message !== 'object') return
+    if (!isRecord(message)) return
     const candidate = message as Partial<InternalMessage>
     if (candidate.type === 'background:select-target' && typeof candidate.fingerprint === 'string') {
       if (fingerprintToVideo.has(candidate.fingerprint)) {

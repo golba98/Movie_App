@@ -1,12 +1,7 @@
-type BrandMarkProps = {
-  className?: string
-}
-
 /** The "Fedora Movies" wordmark. Sizes off the inherited font size, so callers set it with a text-* class. */
-export function BrandMark({ className = '' }: BrandMarkProps) {
+export function BrandMark({ className = '' }: { className?: string }) {
   return (
     <span className={`inline-flex items-center gap-2.5 tracking-tight ${className}`}>
-      {/* Fedora Hat SVG Icon */}
       <svg className="size-[1.65em] shrink-0 text-indigo-400" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
         <circle cx="32" cy="32" r="20" fill="url(#brand-glow)" opacity="0.25" />
         <path d="M22 36C21.5 28.5 24 20 32 20C40 20 42.5 28.5 42 36H22Z" fill="url(#brand-hat)" />

@@ -3,6 +3,7 @@ import type { MediaType } from './tmdb'
 export type MediaMimeType = 'video/mp4' | 'video/webm'
 export type RightsBasis = 'owned' | 'licensed'
 
+/** A playable source for a movie or episode, as sent to viewers. */
 export interface MediaSource {
   id: string
   mediaType: MediaType
@@ -13,11 +14,12 @@ export interface MediaSource {
   sourceUrl: string
   mimeType: MediaMimeType
   rightsBasis: RightsBasis
+  // Built from a search provider rather than stored in the catalog.
   isDynamic?: boolean
 }
 
 // Returned by the extract endpoint when the resolved player explicitly refuses
-// to be framed by this app (see worker/media-sources.ts probeEmbedPolicy).
+// to be framed by this app (see worker/catalog/embed-policy.ts).
 export type EmbedBlockReason = 'x-frame-options' | 'frame-ancestors'
 
 export interface AdminMediaSource extends MediaSource {

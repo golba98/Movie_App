@@ -1,9 +1,24 @@
 import { Link } from 'react-router'
 import { BrandMark } from './BrandMark'
 
+const BROWSE_LINKS = [
+  { to: '/', label: 'Home' },
+  { to: '/movies', label: 'Movies' },
+  { to: '/tv', label: 'TV Shows' },
+  { to: '/favourites', label: 'Favourites' },
+]
+
+function FooterLink({ to, children }: { to: string; children: string }) {
+  return (
+    <li>
+      <Link to={to} className="text-sm text-zinc-400 transition hover:text-white">{children}</Link>
+    </li>
+  )
+}
+
 export function Footer() {
   return (
-    <footer className="border-t border-[#262626] bg-[#070709]/40">
+    <footer className="border-t border-[#262626] bg-canvas/40">
       <div className="mx-auto max-w-7xl px-6 py-12 lg:px-8">
         <div className="grid grid-cols-1 gap-8 border-b border-[#262626] pb-8 md:grid-cols-4">
           <div className="space-y-4 md:col-span-2">
@@ -15,26 +30,13 @@ export function Footer() {
           <div>
             <h4 className="mb-4 text-xs font-bold uppercase tracking-widest text-zinc-300">Browse</h4>
             <ul className="space-y-2.5">
-              <li>
-                <Link to="/" className="text-sm text-zinc-400 transition hover:text-white">Home</Link>
-              </li>
-              <li>
-                <Link to="/movies" className="text-sm text-zinc-400 transition hover:text-white">Movies</Link>
-              </li>
-              <li>
-                <Link to="/tv" className="text-sm text-zinc-400 transition hover:text-white">TV Shows</Link>
-              </li>
-              <li>
-                <Link to="/favourites" className="text-sm text-zinc-400 transition hover:text-white">Favourites</Link>
-              </li>
+              {BROWSE_LINKS.map(({ to, label }) => <FooterLink key={to} to={to}>{label}</FooterLink>)}
             </ul>
           </div>
           <div>
             <h4 className="mb-4 text-xs font-bold uppercase tracking-widest text-zinc-300">System</h4>
             <ul className="space-y-2.5">
-              <li>
-                <Link to="/capture-test" className="text-sm text-zinc-400 transition hover:text-white">Diagnostics</Link>
-              </li>
+              <FooterLink to="/capture-test">Diagnostics</FooterLink>
             </ul>
           </div>
         </div>

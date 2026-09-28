@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { errorMessage } from '../lib/errors'
 
 interface RequestState<T> {
   data: T | null
@@ -8,15 +9,16 @@ interface RequestState<T> {
 
 const initialState = <T,>(): RequestState<T> => ({ data: null, loading: true, error: null })
 
+/**
+ * Runs `loader` whenever its identity changes, aborting the previous request.
+ * Keep the loader stable (useCallback) or it refetches every render.
+ */
 export function useRequest<T>(loader: (signal: AbortSignal) => Promise<T>) {
   const [state, setState] = useState<RequestState<T>>(initialState)
   const [attempt, setAttempt] = useState(0)
 
-  // Reset to the loading state synchronously (during render) whenever the loader
-  // identity changes — e.g. selecting a different movie. Without this, the render
-  // that first sees the new loader still holds the *previous* result with
-  // loading:false, so the old item can paint for a frame before the fetch effect
-  // runs. Clearing here guarantees the next selection never flashes stale data.
+  // Reset during render when the loader changes (e.g. another movie is picked).
+  // Waiting for the effect would paint the previous result for one frame.
   const [tracked, setTracked] = useState({ loader })
   if (tracked.loader !== loader) {
     setTracked({ loader })
@@ -31,8 +33,7 @@ export function useRequest<T>(loader: (signal: AbortSignal) => Promise<T>) {
       .then((data) => setState({ data, loading: false, error: null }))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        const message = error instanceof Error ? error.message : 'Something went wrong. Please try again.'
-        setState({ data: null, loading: false, error: message })
+        setState({ data: null, loading: false, error: errorMessage(error, 'Something went wrong. Please try again.') })
       })
 
     return () => controller.abort()

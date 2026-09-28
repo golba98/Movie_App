@@ -1,25 +1,23 @@
-import { Outlet, useLocation, useNavigationType } from 'react-router'
 import { useEffect } from 'react'
+import { Outlet, useLocation, useNavigationType } from 'react-router'
+import { isDetailsPath } from '../../app/routes'
+import { LegacyImportBanner } from '../../features/favourites/LegacyImportBanner'
+import { useLenisScroll } from '../../hooks/useLenisScroll'
 import { Footer } from './Footer'
 import { Header } from './Header'
-import { LegacyImportBanner } from '../auth/LegacyImportBanner'
 import { MobileHeader, MobileNavigation } from './MobileNavigation'
-import { useLenisScroll } from '../../hooks/useLenisScroll'
 
 export function AppShell() {
   const location = useLocation()
   const navigationType = useNavigationType()
   const lenisRef = useLenisScroll()
 
+  // New pages start at the top; back/forward keeps the browser's position, and
+  // details modals leave the page beneath them where it was.
   useEffect(() => {
-    const isDetailsRoute = location.pathname.startsWith('/movie/') || location.pathname.startsWith('/tv/')
-    if (!isDetailsRoute && navigationType !== 'POP') {
-      if (lenisRef.current) {
-        lenisRef.current.scrollTo(0, { immediate: true })
-      } else {
-        window.scrollTo({ top: 0, behavior: 'instant' })
-      }
-    }
+    if (isDetailsPath(location.pathname) || navigationType === 'POP') return
+    if (lenisRef.current) lenisRef.current.scrollTo(0, { immediate: true })
+    else window.scrollTo({ top: 0, behavior: 'instant' })
   }, [location.pathname, navigationType, lenisRef])
 
   return (

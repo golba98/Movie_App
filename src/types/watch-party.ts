@@ -9,7 +9,21 @@ export type WatchPartySyncStatus = 'synchronized' | 'ahead' | 'behind' | 'buffer
 export type WatchPartyClientType = 'website' | 'browser-extension'
 export type WatchPartyPlaybackCommandReason = 'play' | 'pause' | 'seek' | 'restart' | 'rate' | 'recovery'
 
+export type PlaybackKind = 'video' | 'hls' | 'embed'
+
 export const WATCH_PARTY_EXTENSION_CAPABILITY_VERSION = 1
+
+// Drift correction shared by the website player and the companion extension:
+// drift within `ignoreMs` is left alone, up to `seekMs` is nudged with the
+// playback rate (1% per `msPerRateUnit / 100` ms, within min/maxRate), and
+// anything larger seeks.
+export const DRIFT_CORRECTION = {
+  ignoreMs: 250,
+  seekMs: 1_500,
+  msPerRateUnit: 50_000,
+  minRate: 0.97,
+  maxRate: 1.03,
+} as const
 
 export interface WatchPartyPlaybackCommand {
   reason: WatchPartyPlaybackCommandReason
@@ -156,15 +170,3 @@ export type WatchPartyServerEvent =
   | { type: 'playback:activity'; activity: WatchPartyActivity; revision: number; serverNow: number }
   | { type: 'room:ended'; revision: number; serverNow: number }
   | { type: 'error'; code: string; message: string; revision?: number }
-
-export const expectedPlaybackPosition = (state: Pick<WatchPartyState, 'playbackState' | 'positionMs' | 'playbackRate' | 'stateUpdatedAt'>, serverNow: number) =>
-  state.playbackState === 'playing'
-    ? state.positionMs + Math.max(0, serverNow - state.stateUpdatedAt) * state.playbackRate
-    : state.positionMs
-
-export function driftCorrection(driftMs: number) {
-  const absolute = Math.abs(driftMs)
-  if (absolute <= 250) return { kind: 'none' as const, rate: 1 }
-  if (absolute <= 1_500) return { kind: 'rate' as const, rate: Math.min(1.03, Math.max(0.97, 1 + driftMs / 50_000)) }
-  return { kind: 'seek' as const, rate: 1 }
-}

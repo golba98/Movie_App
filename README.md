@@ -116,7 +116,7 @@ npm run db:migrate:remote
 
 ## Add production secrets
 
-Run both commands and enter each value only at Wrangler's secure prompt:
+Run each command and enter the value only at Wrangler's secure prompt:
 
 ```bash
 npx wrangler secret put ADMIN_PASSWORD
@@ -124,7 +124,7 @@ npx wrangler secret put TMDB_ACCESS_TOKEN
 npx wrangler secret put WATCH_PARTY_SIGNING_SECRET
 ```
 
-The administrator password is intentionally not set by this repository. `wrangler.jsonc` declares both secrets as required, so missing configuration is visible during local builds and deployment checks.
+The administrator password is intentionally not set by this repository. `wrangler.jsonc` deliberately declares no required secrets (the comment there explains why); instead the Worker fails closed while a secret is missing (for example, administrator sign-in and the TMDB proxy answer 503).
 
 ## Validate and deploy
 
@@ -141,30 +141,42 @@ The Playwright suite uses deterministic API mocks and does not need real credent
 
 ## Account and session security
 
-- Viewer passwords use PBKDF2-HMAC-SHA-256 with a unique 16-byte salt and 600,000 iterations.
+- Viewer passwords use PBKDF2-HMAC-SHA-256 with a unique 16-byte salt and 100,000 iterations, the most Cloudflare Workers' Web Crypto accepts.
 - Raw passwords are never stored. Raw session tokens are sent only in `HttpOnly`, `SameSite=Strict` cookies; D1 stores only SHA-256 token hashes.
 - Viewer sessions last 30 days. Administrator sessions last 8 hours.
 - Disabling or resetting an account invalidates its active sessions.
 - Viewer and administrator sign-in attempts are throttled after five failures in a 15-minute window.
 - Mutating API requests require same-origin JSON requests.
-- Account deletion is intentionally unavailable; administrators use disable/expiry controls to preserve auditability.
+- Administrators can delete an account after typing its username to confirm. Deletion signs the viewer out and removes their favourites and watch parties; the audit log keeps the username. Disable or expire an account instead to keep its data.
 - `VITE_*` secrets are not used. The browser calls only `/api/tmdb/*`, and the Worker adds the TMDB token server-side.
 
 ## Project structure
 
 ```text
-migrations/   D1 schema migrations
-public/       Static files, including repository-owned capture test media
-src/          React application
-  api/        Browser API clients
-  components/ Auth, layout, media, and shared UI components
-  hooks/      Shared React state and request hooks
-  pages/      Route-level views, grouped by account and admin areas
-  types/      Shared API and media contracts
-  utils/      Formatting and media helpers
-tests/        Playwright end-to-end, device, responsive, and accessibility tests
-packages/     Chromium watch-sync companion extension workspace
-worker/       Cloudflare Worker routes, authentication, admin, media catalog, favourites, and TMDB proxy
+migrations/            D1 schema migrations
+public/                Static files, including repository-owned capture test media
+src/                   React application
+  app/                 App-level pieces: error boundary, 404 page, route helpers
+  components/          Shared UI: layout (header, navigation, footer) and ui primitives
+  features/            One folder per feature, each with its own components, hooks and API client
+    admin/             Administrator console, media-source catalog, search providers
+    auth/              Sign-in, password change, session provider and route guards
+    catalog/           TMDB discovery: home, browse, search and title details
+    favourites/        Account-synced favourites
+    player/            Streaming player, its hooks and parts, and the capture test page
+    watch-history/     Watch progress, Continue Watching and account sync
+    watch-party/       Watch party rooms and the companion-extension bridge
+  hooks/               Generic React hooks (requests, debouncing, scrolling, dialogs)
+  lib/                 Framework-free helpers: API client, formatting, images, feature flags
+  types/               Contracts shared by the app, the Worker and the extension
+tests/                 Playwright specs by feature, with shared fixtures and mocks in tests/support/
+packages/              Chromium watch-sync companion extension workspace
+worker/                Cloudflare Worker
+  auth/                Sessions, viewer sign-in, the administrator API and its audit log
+  catalog/             TMDB proxy, media sources, search providers, stream resolution, embed policy
+  library/             Favourites and watch history
+  watch-party/         Room routes, the WatchPartyRoom Durable Object and its protocol
+  test/                Worker and D1 tests, one file per area
 ```
 
 The optional Chromium companion is documented in [`docs/watch-sync-extension.md`](docs/watch-sync-extension.md). Build it with `npm run extension:build`; its unpacked output is `packages/watch-sync-extension/dist/`.

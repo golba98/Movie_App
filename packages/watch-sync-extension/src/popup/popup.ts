@@ -1,8 +1,33 @@
 import { originPattern } from '../origins'
 import type { CandidateSummary, ControllerTarget, InternalMessage, PopupViewState } from '../types'
 
+const SEEK_STEP_MS = 10_000
+
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 let state: PopupViewState | null = null
+
+const originPatterns = (origins: string[]) => origins.flatMap((origin) => originPattern(origin) ?? [])
+
+// A labelled checkbox or radio row, as used for origins and candidates.
+function choiceRow(input: HTMLInputElement, title: string, detail: string) {
+  const wrapper = document.createElement('label')
+  wrapper.className = 'choice'
+  const content = document.createElement('span')
+  const strong = document.createElement('strong')
+  strong.textContent = title
+  const small = document.createElement('small')
+  small.textContent = detail
+  content.append(strong, small)
+  wrapper.append(input, content)
+  return wrapper
+}
+
+function emptyMessage(text: string) {
+  const empty = document.createElement('p')
+  empty.className = 'empty'
+  empty.textContent = text
+  return empty
+}
 
 async function send<T>(message: InternalMessage) {
   return chrome.runtime.sendMessage(message) as Promise<T>
@@ -18,29 +43,18 @@ function renderOrigins(current: PopupViewState) {
     ...(current.topOrigin ? [{ origin: current.topOrigin, label: 'Top page', checked: true }] : []),
     ...current.embeddedOrigins.map((origin) => ({ origin, label: 'Embedded frame', checked: false })),
   ]
+  if (!origins.length) {
+    container.replaceChildren(emptyMessage('Open an HTTP or HTTPS page to scan its frames.'))
+    return
+  }
   container.replaceChildren(...origins.map(({ origin, label, checked }) => {
-    const wrapper = document.createElement('label')
-    wrapper.className = 'choice'
     const input = document.createElement('input')
     input.type = 'checkbox'
     input.name = 'origin'
     input.value = origin
     input.checked = checked || current.grantedOrigins.includes(origin)
-    const content = document.createElement('span')
-    const strong = document.createElement('strong')
-    strong.textContent = label
-    const small = document.createElement('small')
-    small.textContent = origin
-    content.append(strong, small)
-    wrapper.append(input, content)
-    return wrapper
+    return choiceRow(input, label, origin)
   }))
-  if (!origins.length) {
-    const empty = document.createElement('p')
-    empty.className = 'empty'
-    empty.textContent = 'Open an HTTP or HTTPS page to scan its frames.'
-    container.replaceChildren(empty)
-  }
 }
 
 function candidateLabel(candidate: CandidateSummary) {
@@ -50,15 +64,10 @@ function candidateLabel(candidate: CandidateSummary) {
 function renderCandidates(current: PopupViewState) {
   const container = element<HTMLDivElement>('candidates')
   if (!current.candidates.length) {
-    const empty = document.createElement('p')
-    empty.className = 'empty'
-    empty.textContent = 'No eligible native videos detected.'
-    container.replaceChildren(empty)
+    container.replaceChildren(emptyMessage('No eligible native videos detected.'))
     return
   }
   container.replaceChildren(...current.candidates.map((candidate) => {
-    const wrapper = document.createElement('label')
-    wrapper.className = 'choice'
     const input = document.createElement('input')
     input.type = 'radio'
     input.name = 'candidate'
@@ -74,14 +83,7 @@ function renderCandidates(current: PopupViewState) {
       }
       void send({ type: 'popup:select-target', target }).then(refresh)
     })
-    const content = document.createElement('span')
-    const strong = document.createElement('strong')
-    strong.textContent = candidateLabel(candidate)
-    const small = document.createElement('small')
-    small.textContent = `${candidate.origin} · ${candidate.fingerprint}`
-    content.append(strong, small)
-    wrapper.append(input, content)
-    return wrapper
+    return choiceRow(input, candidateLabel(candidate), `${candidate.origin} · ${candidate.fingerprint}`)
   }))
 }
 
@@ -106,10 +108,7 @@ async function refresh() {
 element('enable').addEventListener('click', async () => {
   if (!state?.tabId) return
   const origins = checkedOrigins()
-  const patterns = origins.flatMap((origin) => {
-    const pattern = originPattern(origin)
-    return pattern ? [pattern] : []
-  })
+  const patterns = originPatterns(origins)
   if (!patterns.length) return
   const granted = await chrome.permissions.request({ origins: patterns })
   if (!granted) return
@@ -121,10 +120,7 @@ element('revoke').addEventListener('click', async () => {
   if (!state?.tabId) return
   const origins = checkedOrigins()
   await send({ type: 'popup:shutdown-origins', tabId: state.tabId, origins })
-  const patterns = origins.flatMap((origin) => {
-    const pattern = originPattern(origin)
-    return pattern ? [pattern] : []
-  })
+  const patterns = originPatterns(origins)
   if (patterns.length) {
     try {
       await chrome.permissions.remove({ origins: patterns })
@@ -139,7 +135,11 @@ element('rescan').addEventListener('click', async () => {
   if (!state?.tabId) return refresh()
   const grants = await chrome.permissions.getAll()
   const grantedOrigins = (grants.origins ?? []).flatMap((pattern) => {
-    try { return [new URL(pattern.replace(/\/\*$/, '/')).origin] } catch { return [] }
+    try {
+      return [new URL(pattern.replace(/\/\*$/, '/')).origin]
+    } catch {
+      return []
+    }
   })
   await send({ type: 'popup:rescan', tabId: state.tabId, grantedOrigins })
   await refresh()
@@ -148,8 +148,10 @@ element('rescan').addEventListener('click', async () => {
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-control]')) {
   button.addEventListener('click', () => void send({ type: 'popup:control', intent: button.dataset.control as 'play' | 'pause' | 'restart' }))
 }
-element('seek-back').addEventListener('click', () => void send({ type: 'popup:control', intent: 'seek', positionMs: Math.max(0, (state?.positionMs ?? 0) - 10_000) }))
-element('seek-forward').addEventListener('click', () => void send({ type: 'popup:control', intent: 'seek', positionMs: Math.max(0, (state?.positionMs ?? 0) + 10_000) }))
+const seekBy = (deltaMs: number) =>
+  void send({ type: 'popup:control', intent: 'seek', positionMs: Math.max(0, (state?.positionMs ?? 0) + deltaMs) })
+element('seek-back').addEventListener('click', () => seekBy(-SEEK_STEP_MS))
+element('seek-forward').addEventListener('click', () => seekBy(SEEK_STEP_MS))
 element<HTMLSelectElement>('rate').addEventListener('change', (event) => void send({ type: 'popup:control', intent: 'rate', playbackRate: Number((event.target as HTMLSelectElement).value) }))
 element('disconnect').addEventListener('click', () => void send({ type: 'popup:disconnect' }).then(refresh))
 
