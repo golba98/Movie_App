@@ -80,9 +80,18 @@ export async function activeSearchProviders(db: D1Database) {
 /** The embed rule of the provider whose pages `url` belongs to, if it has one. */
 export async function embedRuleFor(db: D1Database, url: string): Promise<EmbedRule | null> {
   const rows = await db
-    .prepare("SELECT base_url, movie_embed_pattern, tv_embed_pattern FROM search_providers WHERE movie_embed_pattern <> '' OR tv_embed_pattern <> ''")
+    .prepare("SELECT base_url, movie_embed_pattern, tv_embed_pattern FROM search_providers WHERE is_active = 1 AND (movie_embed_pattern <> '' OR tv_embed_pattern <> '') ORDER BY length(base_url) DESC")
     .all<Pick<SearchProviderRow, 'base_url' | 'movie_embed_pattern' | 'tv_embed_pattern'>>()
-  const provider = rows.results.find((row) => row.base_url && url.startsWith(row.base_url.replace(/\/$/, '')))
+  const target = new URL(url)
+  const provider = rows.results.find((row) => {
+    try {
+      const base = new URL(row.base_url)
+      const path = base.pathname.replace(/\/$/, '')
+      return target.origin === base.origin && (target.pathname === path || target.pathname.startsWith(`${path}/`))
+    } catch {
+      return false
+    }
+  })
   return provider ? { movie: provider.movie_embed_pattern, tv: provider.tv_embed_pattern } : null
 }
 
@@ -136,9 +145,24 @@ function cleanSearchProvider(input: SearchProviderPayload) {
 
   if (!label) fieldErrors.label = 'Enter a label.'
   if (!baseUrl) fieldErrors.baseUrl = 'Enter a base URL.'
+  else {
+    try {
+      const parsed = new URL(baseUrl)
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Invalid base URL')
+    } catch {
+      fieldErrors.baseUrl = 'Use an HTTPS URL without credentials, a query, or a fragment.'
+    }
+  }
   if (typeof active !== 'boolean') fieldErrors.active = 'Active must be true or false.'
   for (const [field, pattern] of [['movieEmbedPattern', movieEmbedPattern], ['tvEmbedPattern', tvEmbedPattern]]) {
-    if (pattern && !pattern.startsWith('https://')) fieldErrors[field] = 'Use an HTTPS URL, or leave empty.'
+    if (!pattern) continue
+    try {
+      if (/{([^}]+)}/g.test(pattern.replace(/{(?:tmdbId|season|episode)}/g, '1'))) throw new Error('Unknown placeholder')
+      const parsed = new URL(pattern.replace(/{(?:tmdbId|season|episode)}/g, '1'))
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash) throw new Error('Invalid embed URL')
+    } catch {
+      fieldErrors[field] = 'Use an HTTPS URL with {tmdbId}, {season}, or {episode}, or leave empty.'
+    }
   }
   assertNoFieldErrors(fieldErrors, 'Check search provider fields.')
 
@@ -243,6 +267,12 @@ export async function updateSearchProvider(request: Request, env: Env, id: strin
     .run()
 
   await auditAdminEvent(request, env, 'search_provider.update', null, { searchProviderId: id, label: provider.label })
+  // A changed template or origin must not keep returning its previous player.
+  try {
+    await env.DB.prepare('DELETE FROM stream_resolution_cache').run()
+  } catch {
+    console.warn('Player cache invalidation failed', { providerId: id })
+  }
   return json({ provider: publicSearchProvider((await findSearchProvider(env.DB, id))!) })
 }
 

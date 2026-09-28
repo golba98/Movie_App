@@ -65,6 +65,7 @@ export function StreamingPlayer({
   )
   const playback = useSourcePlayback({ playableSources, resetKey, playbackRequested })
   const { activeSource, activeState, isDynamic, iframeKey, iframeLoaded } = playback
+  const playsNative = !isDynamic || (playbackRequested && activeState?.status === 'ready' && playback.playbackKind !== 'embed')
 
   useEffect(() => {
     setInlinePlaybackRequested(false)
@@ -83,7 +84,7 @@ export function StreamingPlayer({
     seasonNumber: isTv ? season : null,
     episodeNumber: isTv ? episode : null,
     runtimeMinutes,
-    active: isDynamic ? playbackRequested && iframeLoaded : videoPlaying,
+    active: playsNative ? videoPlaying : playbackRequested && iframeLoaded,
     iframeRef,
   })
 
@@ -97,13 +98,13 @@ export function StreamingPlayer({
   const sourceLabel = getSourceLabel(activeSource)
   const currentMediaError = mediaError?.sourceId === activeSource.id
     ? mediaError.message
-    : !isDynamic && activeState?.status === 'failed'
+    : playsNative && activeState?.status === 'failed'
       ? activeState.message
       : null
   const showsIframe = isDynamic && playbackRequested && Boolean(playback.extractedUrl && iframeKey)
   // Only real media keeps a fixed 16:9 box on phones; the idle, preparing and
   // failed panels are taller than a phone-width 16:9 box and would be clipped.
-  const showsMedia = !isDynamic || showsIframe
+  const showsMedia = playsNative || showsIframe
 
   let stage: DynamicStage
   if (!playbackRequested) stage = { kind: 'idle' }
@@ -143,6 +144,10 @@ export function StreamingPlayer({
             />
           )}
 
+          {playback.fallbackNotice && (
+            <p role="status" className="mb-3 text-sm text-zinc-300">{playback.fallbackNotice}</p>
+          )}
+
           {/* Promoted to full-viewport with CSS rather than reparented — moving the
               iframe/video in the DOM would remount it and restart playback. */}
           <div
@@ -178,7 +183,7 @@ export function StreamingPlayer({
                 <RotateCw size={18} aria-hidden="true" />
               </button>
             )}
-            {isDynamic ? (
+            {!playsNative ? (
               <DynamicPlayerStage
                 stage={stage}
                 iframeRef={iframeRef}
@@ -205,7 +210,8 @@ export function StreamingPlayer({
             ) : (
               <NativeVideoPlayer
                 videoRef={videoRef}
-                src={activeSource.sourceUrl}
+                src={isDynamic ? playback.extractedUrl! : activeSource.sourceUrl}
+                playbackKind={isDynamic ? playback.playbackKind : 'video'}
                 title={title}
                 playing={videoPlaying}
                 resumePosition={progress.resumePosition}

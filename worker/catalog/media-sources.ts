@@ -6,7 +6,7 @@ import { ApiError, json, readJson } from '../http'
 import { assertNoFieldErrors, positiveInteger, rethrowUniqueViolation, trimmedString } from '../validate'
 import { probeEmbedPolicy } from './embed-policy'
 import { activeSearchProviders, dynamicSourcesFor } from './search-providers'
-import { resolvePlayerUrl } from './stream-resolver'
+import { classifyPlaybackKind, resolvePlayerUrl } from './stream-resolver'
 import { fetchTmdbTitle } from './tmdb'
 
 const MAX_ADMIN_RESULTS = 200
@@ -294,9 +294,11 @@ export async function extractStreamEndpoint(request: Request, env: Env) {
   if (!targetUrl) throw new ApiError(400, 'MISSING_URL', 'The url parameter is required.')
 
   const cleanedUrl = cleanSourceUrl(targetUrl)
-  if (!cleanedUrl) throw new ApiError(400, 'INVALID_URL', 'Use a valid HTTPS target URL.')
+  if (!cleanedUrl || !cleanedUrl.startsWith('https://')) throw new ApiError(400, 'INVALID_URL', 'Use a valid HTTPS target URL.')
 
-  const extractedUrl = await resolvePlayerUrl(env.DB, cleanedUrl)
-  const embedBlocked = extractedUrl ? await probeEmbedPolicy(extractedUrl, url.origin) : null
-  return json({ extractedUrl, embedBlocked })
+  const refresh = url.searchParams.get('refresh') === '1'
+  const extractedUrl = await resolvePlayerUrl(env.DB, cleanedUrl, refresh)
+  const playbackKind = extractedUrl ? classifyPlaybackKind(extractedUrl) : null
+  const embedBlocked = extractedUrl && playbackKind === 'embed' ? await probeEmbedPolicy(extractedUrl, url.origin, refresh) : null
+  return json({ extractedUrl, embedBlocked, playbackKind })
 }

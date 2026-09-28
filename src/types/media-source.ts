@@ -1,4 +1,5 @@
 import type { MediaType } from './tmdb'
+import type { PlaybackKind } from './watch-party'
 
 export type MediaMimeType = 'video/mp4' | 'video/webm'
 export type RightsBasis = 'owned' | 'licensed'
@@ -21,6 +22,12 @@ export interface MediaSource {
 // Returned by the extract endpoint when the resolved player explicitly refuses
 // to be framed by this app (see worker/catalog/embed-policy.ts).
 export type EmbedBlockReason = 'x-frame-options' | 'frame-ancestors'
+
+export interface ExtractedPlayer {
+  extractedUrl: string | null
+  embedBlocked?: EmbedBlockReason | null
+  playbackKind?: PlaybackKind | null
+}
 
 export interface AdminMediaSource extends MediaSource {
   rightsNote: string

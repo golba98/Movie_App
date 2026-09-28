@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { mockApi } from './support/mock-api'
-import { mockTwoSourcePlayer } from './support/player'
+import { fallbackSources, mockTwoSourcePlayer } from './support/player'
 
 test.beforeEach(async ({ page }) => {
   await mockApi(page)
@@ -356,15 +356,11 @@ test('a provider that refuses embedding fails only its own source and offers the
   await expect(page.locator('#streaming-player button', { hasText: 'Server Two' })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
 
-  // Choosing the refused source explicitly shows that source's own error.
+  // Explicitly choosing an unavailable source also returns to the working source.
   await page.locator('#streaming-player button', { hasText: 'Server One' }).click()
   await page.getByRole('button', { name: 'Play movie' }).click()
-  const alert = page.locator('#streaming-player').getByRole('alert')
-  await expect(alert).toContainText("This provider doesn't allow its player to be embedded here")
-  await expect(iframe).toHaveCount(0)
-
-  await alert.getByRole('button', { name: 'Try Server Two (Dynamic)' }).click()
   await expect(iframe).toHaveAttribute('src', embedUrl)
+  await expect(page.locator('#streaming-player').getByRole('status').filter({ hasText: 'is unavailable. Trying' })).toContainText('Server One (Dynamic) is unavailable. Trying Server Two (Dynamic).')
   await expect(page.locator('#streaming-player').getByRole('alert')).toHaveCount(0)
 })
 
@@ -433,4 +429,86 @@ test('a stuck embedded player can be reloaded without leaving the page', async (
   await expect.poll(() => playerLoads).toBe(3)
   await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
   await expect(player.getByRole('status')).toHaveCount(0)
+})
+
+test('@mobile all unavailable sources stop retrying and Retry requests fresh resolution', async ({ page }) => {
+  await page.route('**/api/media-sources/movie/1', (route) => route.fulfill({ json: { data: { sources: fallbackSources } } }))
+  const requests: URL[] = []
+  let retrySucceeds = false
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    requests.push(new URL(route.request().url()))
+    if (retrySucceeds) return route.fulfill({ json: { data: { extractedUrl: 'https://player.test/embed', playbackKind: 'embed' } } })
+    return route.fulfill({ status: 503, json: { error: { code: 'PROVIDER_UNAVAILABLE', message: 'Unavailable' } } })
+  })
+  await page.route('https://player.test/embed', (route) => route.fulfill({ contentType: 'text/html', body: '<title>Working player</title>' }))
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  const player = page.locator('#streaming-player')
+  await expect(player.getByRole('heading', { name: 'Player unavailable' })).toBeVisible()
+  expect(requests).toHaveLength(2)
+  await expect(player.locator('iframe')).toHaveCount(0)
+  await expect(player.getByRole('alert')).toContainText('This provider is unavailable')
+  retrySucceeds = true
+  await player.getByRole('button', { name: 'Retry player' }).click()
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://player.test/embed')
+  expect(requests).toHaveLength(3)
+  expect(requests[2].searchParams.get('refresh')).toBe('1')
+})
+
+test('@mobile a resolved direct stream uses native video and survives Theater mode', async ({ page }) => {
+  await page.route('**/api/media-sources/movie/1', (route) => route.fulfill({ json: { data: { sources: [fallbackSources[0]] } } }))
+  const stream = 'https://cdn.test/demo.mp4'
+  await page.route('**/api/media-sources/extract**', (route) => route.fulfill({ json: { data: { extractedUrl: stream, playbackKind: 'video' } } }))
+  await page.route(stream, (route) => route.fulfill({ path: 'public/test-media/capture-test.mp4', contentType: 'video/mp4' }))
+  await page.goto('/movie/1')
+  await page.getByRole('button', { name: 'Play movie' }).click()
+  const player = page.locator('#streaming-player')
+  const video = player.locator('video')
+  await expect(video).toHaveAttribute('src', stream)
+  await expect(video).toHaveAttribute('playsinline', '')
+  await expect(player.locator('iframe')).toHaveCount(0)
+  await video.evaluate((element) => {
+    const state = window as typeof window & { __resolvedVideo?: Element; __resolvedPauseCalls?: number }
+    state.__resolvedVideo = element
+    state.__resolvedPauseCalls = 0
+    const target = element as HTMLVideoElement
+    const pause = target.pause.bind(target)
+    target.pause = () => {
+      state.__resolvedPauseCalls = (state.__resolvedPauseCalls ?? 0) + 1
+      pause()
+    }
+  })
+  await player.getByRole('button', { name: 'Theater mode' }).click()
+  expect(await video.evaluate((element) => element === (window as typeof window & { __resolvedVideo?: Element }).__resolvedVideo)).toBe(true)
+  await player.getByRole('button', { name: 'Exit theater mode' }).click()
+  await player.getByRole('button', { name: 'Stop player' }).click()
+  await expect(video).toHaveCount(0)
+  expect(await page.evaluate(() => (window as typeof window & { __resolvedPauseCalls?: number }).__resolvedPauseCalls)).toBe(1)
+  await expect(player.getByRole('button', { name: 'Play movie' })).toBeVisible()
+})
+
+test('@mobile HLS resolution loads the playlist through the native video player', async ({ page }) => {
+  await page.route('**/api/media-sources/movie/1', (route) => route.fulfill({ json: { data: { sources: [fallbackSources[0]] } } }))
+  const stream = 'https://cdn.test/master.m3u8'
+  await page.route('**/api/media-sources/extract**', (route) => route.fulfill({ json: { data: { extractedUrl: stream, playbackKind: 'hls' } } }))
+  const playlists: string[] = []
+  let releasePlaylist: (() => void) | undefined
+  const pending = new Promise<void>((resolve) => { releasePlaylist = resolve })
+  await page.route(stream, async (route) => {
+    playlists.push(route.request().url())
+    await pending
+    await route.abort()
+  })
+  try {
+    await page.goto('/movie/1')
+    await page.getByRole('button', { name: 'Play movie' }).click()
+    const player = page.locator('#streaming-player')
+    await expect(player.locator('video')).toHaveCount(1)
+    await expect(player.locator('iframe')).toHaveCount(0)
+    await expect.poll(() => playlists.length).toBeGreaterThan(0)
+    await player.getByRole('button', { name: 'Stop player' }).click()
+    await expect(player.locator('video')).toHaveCount(0)
+  } finally {
+    releasePlaylist?.()
+  }
 })

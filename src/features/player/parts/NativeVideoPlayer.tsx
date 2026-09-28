@@ -1,11 +1,14 @@
 import { Pause, Play, Volume2, VolumeX } from 'lucide-react'
 import { useState, type RefObject } from 'react'
 import { formatClock } from '../../../lib/format'
+import { useHlsSource } from '../../../hooks/useHlsSource'
+import type { PlaybackKind } from '../../../types/watch-party'
 import { MAX_RESUME_SHARE, type ProgressSaveMode } from '../hooks/useWatchProgress'
 
 interface NativeVideoPlayerProps {
   videoRef: RefObject<HTMLVideoElement | null>
   src: string
+  playbackKind?: PlaybackKind
   title: string
   playing: boolean
   resumePosition: number | null
@@ -23,6 +26,7 @@ interface NativeVideoPlayerProps {
 export function NativeVideoPlayer({
   videoRef,
   src,
+  playbackKind = 'video',
   title,
   playing,
   resumePosition,
@@ -31,6 +35,7 @@ export function NativeVideoPlayer({
   onPlaybackError,
   onMediaError,
 }: NativeVideoPlayerProps) {
+  useHlsSource(videoRef, src, playbackKind, onMediaError)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [muted, setMuted] = useState(false)
@@ -76,7 +81,7 @@ export function NativeVideoPlayer({
     <>
       <video
         ref={videoRef}
-        src={src}
+        src={playbackKind === 'hls' ? undefined : src}
         playsInline
         preload="metadata"
         className="block size-full bg-black object-contain"

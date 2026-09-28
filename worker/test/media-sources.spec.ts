@@ -189,7 +189,7 @@ describe('authorised media-source catalog', () => {
     vi.stubGlobal('fetch', outbound)
     try {
       const path = `/api/media-sources/extract?url=${encodeURIComponent(sourceUrl)}`
-      const expected = { data: { extractedUrl: 'https://player.example.test/cacheable', embedBlocked: null } }
+      const expected = { data: { extractedUrl: 'https://player.example.test/cacheable', embedBlocked: null, playbackKind: 'embed' } }
       const [first, second] = await Promise.all([
         request(path, { cookie: viewer }),
         request(path, { cookie: viewer }),
@@ -221,7 +221,7 @@ describe('authorised media-source catalog', () => {
     try {
       const response = await request(`/api/media-sources/extract?url=${encodeURIComponent(sourceUrl)}`, { cookie: viewer })
       expect(await response.json()).toEqual({
-        data: { extractedUrl: 'https://refusing-player.example.test/embed', embedBlocked: 'x-frame-options' },
+        data: { extractedUrl: 'https://refusing-player.example.test/embed', embedBlocked: 'x-frame-options', playbackKind: 'embed' },
       })
     } finally {
       vi.unstubAllGlobals()

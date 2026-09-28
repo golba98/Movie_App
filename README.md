@@ -61,7 +61,9 @@ Open the URL printed by Vite, then visit `/admin` to sign in and create the firs
 
 Use the **Authorised media catalog** in `/admin` to associate a direct MP4 or WebM URL with a TMDB movie or TV episode. Sources may be a same-origin path or an HTTPS URL. A remote media host must provide a browser-compatible codec, correct content type, and byte-range support; Fedora Movies deliberately does not proxy remote video.
 
-Optional dynamic search providers are configured separately in `/admin`. A provider's label is what viewers see on its source button. Providers that build their player in the browser can set movie and TV embed patterns (`{tmdbId}`, `{season}`, `{episode}`); the Worker then uses that embed URL instead of scraping the provider's page. The Worker checks the configured provider and resolves its external embed only after the viewer presses **Play**. The player stays dark while the external frame prepares, loads inline first, and can then expand to Theater mode without restarting. The raw provider page is not embedded; the frame is sandboxed and cannot use its own fullscreen permission.
+Optional dynamic search providers are configured separately in `/admin`. For websites that build their player in the browser, configure their movie and TV embed patterns using `{tmdbId}`, `{season}`, and `{episode}`. Leave the patterns empty to extract a player from the provider's page. The Worker resolves playback only after the viewer presses **Play**. Embeds load in an external iframe with fullscreen permission; MP4/WebM and HLS streams load in the app's native video player. Unavailable sources automatically fall back to another configured source, and Retry resolves the player again without reusing its cached URL.
+
+The default Flixbaba configuration uses its current `www.flixbaba.best` site and the `vsembed.ru` player supplied by that site. Soap2Day resolves its own player and may be unavailable when its configured website refuses requests. Provider availability and individual title availability can change.
 
 The player:
 
@@ -188,3 +190,5 @@ The optional Chromium companion is documented in [`docs/watch-sync-extension.md`
 South Africa (`ZA`) is the default region for provider availability. Provider data is supplied through TMDB's JustWatch integration and can change.
 
 **This product uses the TMDB API but is not endorsed or certified by TMDB.**
+
+Deployment applies pending production D1 migrations before publishing the Worker. Apply migrations before using `wrangler deploy` directly.
