@@ -19,9 +19,11 @@ interface PlaybackWatcherOptions {
   onUpdate: (watchSeconds: number, reason: WatcherUpdateReason) => void
 }
 
-// Counts how long a title has actually been watched: time only accrues while the
-// player is active and the page is visible, using real elapsed time rather than
-// tick counts so throttled timers can't inflate it.
+/**
+ * Counts how long a title has actually been watched: time only accrues while
+ * the player is active and the page is visible, using real elapsed time rather
+ * than tick counts so throttled timers can't inflate it.
+ */
 export function usePlaybackWatcher({ active, sessionKey, initialSeconds, onUpdate }: PlaybackWatcherOptions) {
   const onUpdateRef = useRef(onUpdate)
   const initialSecondsRef = useRef(initialSeconds)

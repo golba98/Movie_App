@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+/** Copies text; `copied` stays true for `resetMs` so the button can confirm it. */
 export function useCopyToClipboard(resetMs = 1500) {
   const [copied, setCopied] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)

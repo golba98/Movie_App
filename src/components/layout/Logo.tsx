@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import { BrandMark } from './BrandMark'
 
+/** The wordmark as a link home, used in page headers. */
 export function Logo() {
   return (
     <Link

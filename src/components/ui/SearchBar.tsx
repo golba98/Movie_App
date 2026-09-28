@@ -1,7 +1,13 @@
 import { Search, X } from 'lucide-react'
 import { useRef } from 'react'
 
-export function SearchBar({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+interface SearchBarProps {
+  value: string
+  onChange: (value: string) => void
+}
+
+/** The search field; clearing it keeps focus so the next query can be typed straight away. */
+export function SearchBar({ value, onChange }: SearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   return (

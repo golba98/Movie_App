@@ -49,7 +49,7 @@ export function useTheaterFullscreen(
       try {
         video.webkitEnterFullscreen()
       } catch {
-        // CSS theater layout remains
+        // The CSS theater layout remains.
       }
     }
 

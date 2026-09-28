@@ -1,6 +1,6 @@
 import { type RefObject, useEffect } from 'react'
 
-const mediaEvents = [
+const MEDIA_EVENTS = [
   'play',
   'pause',
   'waiting',
@@ -12,6 +12,7 @@ const mediaEvents = [
   'encrypted',
 ] as const
 
+// Logs never carry query strings, which may hold signed tokens.
 function sanitizeUrl(value: string) {
   if (!value) return '(none)'
   try {
@@ -35,6 +36,7 @@ function videoSnapshot(video: HTMLVideoElement) {
   }
 }
 
+/** Development-only console logging of a <video>'s lifecycle, for playback bug reports. */
 export function useVideoDiagnostics(
   videoRef: RefObject<HTMLVideoElement | null>,
   label: string,
@@ -49,11 +51,11 @@ export function useVideoDiagnostics(
     const handleMediaEvent = (event: Event) => {
       console.debug('[video-diagnostics]', label, event.type, videoSnapshot(video))
     }
-    mediaEvents.forEach((eventName) => video.addEventListener(eventName, handleMediaEvent))
+    for (const eventName of MEDIA_EVENTS) video.addEventListener(eventName, handleMediaEvent)
     console.debug('[video-diagnostics]', label, 'mounted', videoSnapshot(video))
 
     return () => {
-      mediaEvents.forEach((eventName) => video.removeEventListener(eventName, handleMediaEvent))
+      for (const eventName of MEDIA_EVENTS) video.removeEventListener(eventName, handleMediaEvent)
       console.debug('[video-diagnostics]', label, 'unmounted', videoSnapshot(video))
     }
   }, [label, videoRef])

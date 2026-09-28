@@ -9,7 +9,9 @@ export function NotFoundPage() {
         <p className="mt-5 text-sm font-black uppercase tracking-[0.18em] text-brand-400">404</p>
         <h1 className="mt-2 text-3xl font-black sm:text-5xl">This page wandered off</h1>
         <p className="mt-4 leading-7 text-zinc-400">The route does not exist, but there are plenty of stories waiting back home.</p>
-        <Link to="/" className="mt-7 inline-flex min-h-12 items-center rounded-xl bg-white px-5 font-black text-zinc-950 transition hover:bg-zinc-200">Return home</Link>
+        <Link to="/" className="mt-7 inline-flex min-h-12 items-center rounded-xl bg-white px-5 font-black text-zinc-950 transition hover:bg-zinc-200">
+          Return home
+        </Link>
       </div>
     </div>
   )
