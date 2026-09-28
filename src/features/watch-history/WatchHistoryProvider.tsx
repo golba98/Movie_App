@@ -20,7 +20,7 @@ import {
 import { useHistorySync } from './useHistorySync'
 import { WatchedHistoryContext } from './watch-history-context'
 
-export function WatchedHistoryProvider({ children }: { children: ReactNode }) {
+export function WatchHistoryProvider({ children }: { children: ReactNode }) {
   const { account } = useAuth()
   const accountId = account && !account.mustChangePassword ? account.id : null
   const [loadedFor, setLoadedFor] = useState(accountId)

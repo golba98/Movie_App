@@ -1,12 +1,9 @@
 import { type FormEvent, useState } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router'
-import { ApiClientError } from '../../lib/api-client'
-import { AuthError, AuthField, AuthFieldGroup, AuthLayout, AuthSubmitButton } from './AuthLayout'
+import { apiErrorMessage } from '../../lib/errors'
 import { useAuth } from './auth-context'
-
-function safeNext(value: string | null) {
-  return value?.startsWith('/') && !value.startsWith('//') ? value : '/'
-}
+import { AuthError, AuthField, AuthFieldGroup, AuthLayout, AuthSubmitButton } from './AuthLayout'
+import { changePasswordPath, safeNext } from './safe-redirect'
 
 export function LoginPage() {
   const { account, loading, login } = useAuth()
@@ -19,7 +16,7 @@ export function LoginPage() {
   const next = safeNext(searchParams.get('next'))
 
   if (!loading && account) {
-    return <Navigate to={account.mustChangePassword ? `/change-password?next=${encodeURIComponent(next)}` : next} replace />
+    return <Navigate to={account.mustChangePassword ? changePasswordPath(next) : next} replace />
   }
 
   const submit = async (event: FormEvent) => {
@@ -28,12 +25,9 @@ export function LoginPage() {
     setSubmitting(true)
     try {
       const signedIn = await login(username, password)
-      navigate(
-        signedIn.mustChangePassword ? `/change-password?next=${encodeURIComponent(next)}` : next,
-        { replace: true },
-      )
+      navigate(signedIn.mustChangePassword ? changePasswordPath(next) : next, { replace: true })
     } catch (caught) {
-      setError(caught instanceof ApiClientError ? caught.message : 'Sign-in failed. Please try again.')
+      setError(apiErrorMessage(caught, 'Sign-in failed. Please try again.'))
     } finally {
       setSubmitting(false)
     }

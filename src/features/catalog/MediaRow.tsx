@@ -1,18 +1,11 @@
-import type { MediaItem } from '../../types/tmdb'
 import { ErrorMessage } from '../../components/ui/ErrorMessage'
 import { CardSkeleton } from '../../components/ui/LoadingSkeleton'
-import { MediaCard, type MediaCardVariant } from './MediaCard'
 import { useDragScroll } from '../../hooks/useDragScroll'
+import type { MediaItem } from '../../types/tmdb'
+import { MediaCard, type MediaCardVariant } from './MediaCard'
+import { mediaKey } from './pagination'
 
-export function MediaRow({
-  id,
-  title,
-  items,
-  loading,
-  error,
-  onRetry,
-  variant,
-}: {
+interface MediaRowProps {
   id?: string
   title: string
   items: MediaItem[]
@@ -20,16 +13,16 @@ export function MediaRow({
   error: string | null
   onRetry?: () => void
   variant?: MediaCardVariant
-}) {
+}
+
+export function MediaRow({ id, title, items, loading, error, onRetry, variant }: MediaRowProps) {
   const scrollRef = useDragScroll()
+  const headingId = `${id ?? title.replaceAll(' ', '-').toLowerCase()}-heading`
 
   return (
-    <section id={id} className="media-row-container" aria-labelledby={`${id ?? title.replaceAll(' ', '-').toLowerCase()}-heading`}>
+    <section id={id} className="media-row-container" aria-labelledby={headingId}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <h2
-          id={`${id ?? title.replaceAll(' ', '-').toLowerCase()}-heading`}
-          className="text-xl font-black tracking-tight text-white sm:text-2xl"
-        >
+        <h2 id={headingId} className="text-xl font-black tracking-tight text-white sm:text-2xl">
           {title}
         </h2>
       </div>
@@ -52,7 +45,7 @@ export function MediaRow({
               <CardSkeleton />
             ) : (
               items.map((item) => (
-                <div key={`${item.mediaType}-${item.id}`} className="snap-start">
+                <div key={mediaKey(item)} className="snap-start">
                   <MediaCard item={item} row variant={variant} />
                 </div>
               ))

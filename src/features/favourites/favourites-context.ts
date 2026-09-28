@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 import type { FavouriteItem } from '../../types/favourite'
 import type { MediaItem } from '../../types/tmdb'
 
-export interface FavouritesContextValue {
+interface FavouritesContextValue {
   favourites: FavouriteItem[]
   loading: boolean
   error: string | null

@@ -5,7 +5,7 @@ import App from './App'
 import { AppErrorBoundary } from './app/AppErrorBoundary'
 import { AuthProvider } from './features/auth/AuthProvider'
 import { FavouritesProvider } from './features/favourites/FavouritesProvider'
-import { WatchedHistoryProvider } from './features/watch-history/WatchHistoryProvider'
+import { WatchHistoryProvider } from './features/watch-history/WatchHistoryProvider'
 import './index.css'
 
 createRoot(document.getElementById('root')!).render(
@@ -13,11 +13,11 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <AuthProvider>
         <FavouritesProvider>
-          <WatchedHistoryProvider>
+          <WatchHistoryProvider>
             <AppErrorBoundary>
               <App />
             </AppErrorBoundary>
-          </WatchedHistoryProvider>
+          </WatchHistoryProvider>
         </FavouritesProvider>
       </AuthProvider>
     </BrowserRouter>

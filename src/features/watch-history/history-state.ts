@@ -18,7 +18,7 @@ export function entryKey(mediaType: MediaType, id: number, seasonNumber?: number
   return mediaType === 'tv' ? `tv:${id}:${seasonNumber}:${episodeNumber}` : `movie:${id}`
 }
 
-export const emptyHistory = (): HistoryState => ({ entries: {}, titles: {} })
+const emptyHistory = (): HistoryState => ({ entries: {}, titles: {} })
 
 export function isHistoryState(value: unknown): value is HistoryState {
   return isRecord(value) && isRecord(value.entries) && isRecord(value.titles)

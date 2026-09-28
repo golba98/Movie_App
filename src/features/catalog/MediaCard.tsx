@@ -1,23 +1,23 @@
 import { Heart, Star, X } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
+import { formatRating } from '../../lib/format'
+import type { MediaItem } from '../../types/tmdb'
 import { useFavourites } from '../favourites/favourites-context'
 import { useWatchedHistory } from '../watch-history/watch-history-context'
-import type { MediaItem } from '../../types/tmdb'
-import { formatRating } from '../../lib/format'
 import { mediaPath } from './media'
 import { PosterImage } from './PosterImage'
 
 export type MediaCardVariant = 'default' | 'continue'
 
-export function MediaCard({
-  item,
-  row = false,
-  variant = 'default',
-}: {
+interface MediaCardProps {
   item: MediaItem
+  // Fixed width for horizontally scrolling rows; grids size cards themselves.
   row?: boolean
+  // 'continue' opens straight into playback and shows progress.
   variant?: MediaCardVariant
-}) {
+}
+
+export function MediaCard({ item, row = false, variant = 'default' }: MediaCardProps) {
   const { isFavourite, toggleFavourite } = useFavourites()
   const { getResumeTarget, getProgress, isMovieWatched, removeFromContinueWatching } = useWatchedHistory()
   const favourite = isFavourite(item)

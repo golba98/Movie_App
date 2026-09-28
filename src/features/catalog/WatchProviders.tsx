@@ -1,31 +1,11 @@
 import { ExternalLink } from 'lucide-react'
-import type { WatchProviderRegion } from '../../types/tmdb'
 import { providerLogoUrl } from '../../lib/images'
-import { dedupeProviders } from './media'
-
-function providerGroups(providers?: WatchProviderRegion) {
-  if (!providers) return []
-  return [
-    {
-      label: 'Stream, free or with ads',
-      items: dedupeProviders([...(providers.flatrate ?? []), ...(providers.free ?? []), ...(providers.ads ?? [])]),
-    },
-    { label: 'Rent', items: dedupeProviders(providers.rent) },
-    { label: 'Buy', items: dedupeProviders(providers.buy) },
-  ].filter((group) => group.items.length > 0)
-}
-
-export function hasWatchProviders(providers?: WatchProviderRegion) {
-  return providerGroups(providers).length > 0
-}
+import type { WatchProviderRegion } from '../../types/tmdb'
+import { providerGroups } from './media'
 
 export function WatchProviders({ providers }: { providers?: WatchProviderRegion }) {
-  if (!providers) return null
   const groups = providerGroups(providers)
-
-  if (groups.length === 0) {
-    return null
-  }
+  if (!providers || groups.length === 0) return null
 
   return (
     <div className="rounded-2xl border border-white/8 bg-white/4 p-5 sm:p-6">

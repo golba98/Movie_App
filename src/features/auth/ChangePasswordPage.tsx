@@ -1,8 +1,9 @@
 import { type FormEvent, useState } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router'
-import { ApiClientError } from '../../lib/api-client'
-import { AuthError, AuthField, AuthFieldGroup, AuthLayout, AuthSubmitButton } from './AuthLayout'
+import { apiErrorMessage } from '../../lib/errors'
 import { useAuth } from './auth-context'
+import { AuthError, AuthField, AuthFieldGroup, AuthLayout, AuthSubmitButton } from './AuthLayout'
+import { safeNext } from './safe-redirect'
 
 export function ChangePasswordPage() {
   const { account, changePassword, logout } = useAuth()
@@ -13,8 +14,7 @@ export function ChangePasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const nextValue = searchParams.get('next')
-  const next = nextValue?.startsWith('/') && !nextValue.startsWith('//') ? nextValue : '/'
+  const next = safeNext(searchParams.get('next'))
 
   if (!account) return <Navigate to="/login" replace />
 
@@ -30,7 +30,7 @@ export function ChangePasswordPage() {
       await changePassword(currentPassword, newPassword)
       navigate(next === '/change-password' ? '/' : next, { replace: true })
     } catch (caught) {
-      setError(caught instanceof ApiClientError ? caught.message : 'The password could not be changed.')
+      setError(apiErrorMessage(caught, 'The password could not be changed.'))
     } finally {
       setSubmitting(false)
     }

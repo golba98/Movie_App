@@ -1,7 +1,7 @@
 import { UserRound } from 'lucide-react'
-import type { CastMember } from '../../types/tmdb'
-import { profileUrl } from '../../lib/images'
 import { useDragScroll } from '../../hooks/useDragScroll'
+import { profileUrl } from '../../lib/images'
+import type { CastMember } from '../../types/tmdb'
 
 export function CastList({ cast }: { cast: CastMember[] }) {
   const scrollRef = useDragScroll()
@@ -22,12 +22,7 @@ export function CastList({ cast }: { cast: CastMember[] }) {
           <article key={person.id} className="w-28 shrink-0 snap-start">
             <div className="aspect-[4/5] overflow-hidden rounded-2xl bg-zinc-900 ring-1 ring-white/8">
               {profile ? (
-                <img
-                  src={profile}
-                  alt={`${person.name} profile`}
-                  loading="lazy"
-                  className="size-full object-cover"
-                />
+                <img src={profile} alt={`${person.name} profile`} loading="lazy" className="size-full object-cover" />
               ) : (
                 <div className="grid size-full place-items-center text-zinc-600" aria-label={`No profile image for ${person.name}`} role="img">
                   <UserRound size={30} aria-hidden="true" />

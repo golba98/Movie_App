@@ -1,16 +1,15 @@
 import { Film } from 'lucide-react'
-import { useState, useEffect } from 'react'
-import { imageUrl } from '../../lib/images'
+import { useEffect, useState } from 'react'
+import { imageUrl, type ImageSize } from '../../lib/images'
 
-export function PosterImage({
-  path,
-  title,
-  size = 'w500',
-}: {
+interface PosterImageProps {
   path: string | null
   title: string
-  size?: Parameters<typeof imageUrl>[1]
-}) {
+  size?: ImageSize
+}
+
+/** A poster that fades in once decoded, with a labelled placeholder when there is none. */
+export function PosterImage({ path, title, size = 'w500' }: PosterImageProps) {
   const source = imageUrl(path, size)
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)

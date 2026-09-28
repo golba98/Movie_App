@@ -1,12 +1,29 @@
 import { ArrowLeft, CircleStop, MonitorUp, Play, ShieldAlert } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { errorMessage } from '../../lib/errors'
 import { useVideoDiagnostics } from './hooks/useVideoDiagnostics'
 
 const TEST_MEDIA_URL = '/test-media/capture-test.mp4'
 
 type CaptureState = 'idle' | 'starting' | 'active' | 'stopped'
 
+function describeTrack(track: MediaStreamTrack | undefined) {
+  const settings = track?.getSettings()
+  return [
+    settings?.displaySurface ? `Surface: ${settings.displaySurface}` : 'Surface: browser/compositor selected',
+    settings?.width && settings?.height ? `${settings.width}×${settings.height}` : null,
+    settings?.frameRate ? `${Math.round(settings.frameRate)} fps` : null,
+  ].filter(Boolean).join(' · ')
+}
+
+const isCancelled = (error: unknown) =>
+  error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError')
+
+/**
+ * Separates app playback faults from browser, GPU or compositor capture faults:
+ * plays a plain MP4 next to a live getDisplayMedia() preview of it.
+ */
 export function CaptureCompatibilityPage() {
   const originalRef = useRef<HTMLVideoElement>(null)
   const previewRef = useRef<HTMLVideoElement>(null)
@@ -19,8 +36,7 @@ export function CaptureCompatibilityPage() {
   useVideoDiagnostics(previewRef, 'capture-test:preview', '(display stream)', false)
 
   const stopCapture = useCallback((state: CaptureState = 'stopped') => {
-    const stream = streamRef.current
-    stream?.getTracks().forEach((track) => track.stop())
+    streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     if (previewRef.current) previewRef.current.srcObject = null
     setCaptureState(state)
@@ -46,19 +62,10 @@ export function CaptureCompatibilityPage() {
       })
       streamRef.current = stream
       const videoTrack = stream.getVideoTracks()[0]
-      const settings = videoTrack?.getSettings()
-      setCaptureDetails([
-        settings?.displaySurface ? `Surface: ${settings.displaySurface}` : 'Surface: browser/compositor selected',
-        settings?.width && settings?.height ? `${settings.width}×${settings.height}` : null,
-        settings?.frameRate ? `${Math.round(settings.frameRate)} fps` : null,
-      ].filter(Boolean).join(' · '))
+      setCaptureDetails(describeTrack(videoTrack))
       setCaptureState('active')
-      videoTrack?.addEventListener('ended', () => {
-        streamRef.current = null
-        if (previewRef.current) previewRef.current.srcObject = null
-        setCaptureState('stopped')
-        setCaptureDetails(null)
-      }, { once: true })
+      // The browser's own "Stop sharing" control ends the track.
+      videoTrack?.addEventListener('ended', () => stopCapture(), { once: true })
       if (previewRef.current) {
         try {
           previewRef.current.srcObject = stream
@@ -71,11 +78,9 @@ export function CaptureCompatibilityPage() {
       }
     } catch (error) {
       stopCapture('idle')
-      if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError')) {
-        setCaptureError('Screen capture was cancelled or not permitted. The original video was not changed.')
-      } else {
-        setCaptureError(error instanceof Error ? error.message : 'Screen capture could not start.')
-      }
+      setCaptureError(isCancelled(error)
+        ? 'Screen capture was cancelled or not permitted. The original video was not changed.'
+        : errorMessage(error, 'Screen capture could not start.'))
     }
   }
 
@@ -96,7 +101,10 @@ export function CaptureCompatibilityPage() {
       <section className="mt-8 grid gap-6 lg:grid-cols-2" aria-label="Original and captured video comparison">
         <article className="rounded-3xl border border-white/8 bg-white/[0.025] p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div><p className="text-xs font-bold uppercase tracking-wider text-emerald-300">Original</p><h2 className="mt-1 text-lg font-semibold">Local authorised MP4</h2></div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-emerald-300">Original</p>
+              <h2 className="mt-1 text-lg font-semibold">Local authorised MP4</h2>
+            </div>
             <Play className="text-zinc-500" aria-hidden="true" />
           </div>
           <video
@@ -114,7 +122,10 @@ export function CaptureCompatibilityPage() {
 
         <article className="rounded-3xl border border-white/8 bg-white/[0.025] p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div><p className="text-xs font-bold uppercase tracking-wider text-sky-300">Captured preview</p><h2 className="mt-1 text-lg font-semibold">Selected display stream</h2></div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-sky-300">Captured preview</p>
+              <h2 className="mt-1 text-lg font-semibold">Selected display stream</h2>
+            </div>
             <MonitorUp className="text-zinc-500" aria-hidden="true" />
           </div>
           <video
@@ -146,7 +157,11 @@ export function CaptureCompatibilityPage() {
             </button>
           </div>
           <p role="status" className="mt-3 min-h-5 text-xs text-zinc-500">
-            {captureState === 'active' ? captureDetails : captureState === 'stopped' ? 'Capture stopped. The original video remains mounted.' : 'No display stream is active.'}
+            {captureState === 'active'
+              ? captureDetails
+              : captureState === 'stopped'
+                ? 'Capture stopped. The original video remains mounted.'
+                : 'No display stream is active.'}
           </p>
           {captureError && <p role="alert" className="mt-2 rounded-xl border border-amber-300/20 bg-amber-300/8 px-3 py-2 text-xs text-amber-100">{captureError}</p>}
         </article>

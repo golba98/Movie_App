@@ -1,8 +1,8 @@
-import { Eye, EyeOff } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { BrandMark } from '../../components/layout/BrandMark'
+import { PasswordToggle } from '../../components/ui/PasswordToggle'
 
-type AuthLayoutProps = {
+interface AuthLayoutProps {
   eyebrow: string
   title: string
   subtitle: string
@@ -61,7 +61,7 @@ export function AuthFieldGroup({ children }: { children: ReactNode }) {
   )
 }
 
-type AuthFieldProps = {
+interface AuthFieldProps {
   id: string
   label: string
   value: string
@@ -117,17 +117,14 @@ export function AuthField({
         {label}
       </label>
       {isPassword && (
-        <button
-          type="button"
-          onClick={() => setPasswordVisible((visible) => !visible)}
-          onMouseDown={(event) => event.preventDefault()}
-          aria-label={`${passwordVisible ? 'Hide' : 'Show'} ${label}`}
-          aria-controls={id}
-          aria-pressed={passwordVisible}
-          className="absolute right-2 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full text-zinc-500 transition hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-        >
-          {passwordVisible ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-        </button>
+        <PasswordToggle
+          visible={passwordVisible}
+          label={label}
+          controls={id}
+          iconSize={18}
+          className="size-10"
+          onToggle={() => setPasswordVisible((visible) => !visible)}
+        />
       )}
     </div>
   )
@@ -146,7 +143,7 @@ export function AuthError({ message }: { message: string }) {
   )
 }
 
-type AuthSubmitButtonProps = {
+interface AuthSubmitButtonProps {
   submitting: boolean
   pendingLabel: string
   children: ReactNode

@@ -1,6 +1,6 @@
-// Shared configuration for third-party player iframes. No `sandbox` attribute:
-// providers refuse to run inside sandboxed frames, and the cross-origin boundary
-// already isolates this app's DOM, cookies and storage from the player.
+// Shared configuration for third-party player iframes. There is no `sandbox`
+// attribute: providers refuse to run inside sandboxed frames, and the
+// cross-origin boundary already isolates this app's DOM, cookies and storage.
 export const PLAYER_IFRAME_ALLOW = 'autoplay; encrypted-media; picture-in-picture; fullscreen'
 export const PLAYER_IFRAME_REFERRER_POLICY = 'origin'
 

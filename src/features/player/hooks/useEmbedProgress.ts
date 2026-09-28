@@ -1,10 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { isRecord } from '../../../lib/is-record'
-
-export interface EmbedProgress {
-  position: number
-  duration: number
-}
+import type { PlaybackProgress } from '../../../types/watch-history'
 
 function toNumber(value: unknown) {
   const number = typeof value === 'string' ? Number(value) : value
@@ -14,7 +10,7 @@ function toNumber(value: unknown) {
 // Embedded providers report progress in different shapes, e.g.
 // { type: 'PLAYER_EVENT', data: { event: 'timeupdate', currentTime, duration } },
 // { currentTime, duration }, { timestamp, duration } or { progress: 0-100, duration }.
-function parseEmbedProgress(raw: unknown): EmbedProgress | null {
+function parseEmbedProgress(raw: unknown): PlaybackProgress | null {
   let data = raw
   if (typeof data === 'string') {
     try {
@@ -40,7 +36,7 @@ function parseEmbedProgress(raw: unknown): EmbedProgress | null {
 // from that iframe's own window are trusted.
 export function useEmbedProgress(
   iframeRef: RefObject<HTMLIFrameElement | null>,
-  onProgress: (progress: EmbedProgress) => void,
+  onProgress: (progress: PlaybackProgress) => void,
 ) {
   const onProgressRef = useRef(onProgress)
 

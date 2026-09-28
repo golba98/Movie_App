@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { PASSWORD_ITERATIONS } from '../crypto'
 import worker from '../index'
 import { classifyPlaybackKind, embedBlockReasonFromHeaders, extractDirectPlayerUrl } from '../media-sources'
-import { driftCorrection, expectedPlaybackPosition } from '../../src/types/watch-party'
+import { driftCorrection, expectedPlaybackPosition } from '../../src/features/watch-party/sync'
 
 const origin = 'https://fedora.test'
 

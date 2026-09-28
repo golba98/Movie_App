@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 import type { MediaItem, MediaType } from '../../types/tmdb'
 import type { EpisodeRef, PlaybackProgress, TitleProgress, WatchedItem, WatchRecord } from '../../types/watch-history'
 
-export interface WatchedHistoryContextValue {
+interface WatchedHistoryContextValue {
   continueWatching: TitleProgress[]
   isEpisodeWatched: (showId: number, seasonNumber: number, episodeNumber: number) => boolean
   toggleEpisodeWatched: (showId: number, seasonNumber: number, episodeNumber: number) => void
@@ -21,6 +21,6 @@ export const WatchedHistoryContext = createContext<WatchedHistoryContextValue | 
 
 export function useWatchedHistory() {
   const context = useContext(WatchedHistoryContext)
-  if (!context) throw new Error('useWatchedHistory must be used within WatchedHistoryProvider')
+  if (!context) throw new Error('useWatchedHistory must be used within WatchHistoryProvider')
   return context
 }

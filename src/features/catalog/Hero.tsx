@@ -1,19 +1,17 @@
 import { Info, Play, Star } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
-import type { MediaItem, Video } from '../../types/tmdb'
-import { backdropSrcSet, backdropUrl } from '../../lib/images'
 import { formatRating } from '../../lib/format'
+import { backdropSrcSet, backdropUrl } from '../../lib/images'
+import type { MediaItem, Video } from '../../types/tmdb'
 import { mediaPath } from './media'
 
-export function Hero({
-  item,
-  trailer,
-  onWatchTrailer,
-}: {
+interface HeroProps {
   item: MediaItem
   trailer: Video | null
   onWatchTrailer: () => void
-}) {
+}
+
+export function Hero({ item, trailer, onWatchTrailer }: HeroProps) {
   const backdrop = backdropUrl(item.backdropPath)
   const location = useLocation()
 

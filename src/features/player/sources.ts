@@ -11,7 +11,7 @@ export type SourceFailureReason =
 
 // Each source keeps its own player state so one failing source never
 // clobbers another one's progress or error.
-export type SourcePlayerState =
+type SourcePlayerState =
   | { status: 'extracting' }
   | { status: 'ready'; extractedUrl: string }
   | { status: 'failed'; reason: SourceFailureReason; message: string }

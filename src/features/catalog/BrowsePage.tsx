@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getPopular } from './api'
 import { ErrorMessage } from '../../components/ui/ErrorMessage'
 import { GridSkeleton } from '../../components/ui/LoadingSkeleton'
-import { MediaCard } from './MediaCard'
+import { errorMessage } from '../../lib/errors'
 import type { MediaItem, MediaType } from '../../types/tmdb'
+import { getPopular } from './api'
 import { normalizeMediaList } from './media'
+import { LoadMoreButton, MediaGrid } from './MediaGrid'
+import { pageLimit, uniqueMedia } from './pagination'
+
+const COPY = {
+  movie: {
+    title: 'Popular movies',
+    description: 'Explore the movies audiences are discovering on TMDB right now.',
+  },
+  tv: {
+    title: 'Popular TV shows',
+    description: 'Explore the TV series audiences are discovering on TMDB right now.',
+  },
+}
 
 export function BrowsePage({ mediaType }: { mediaType: MediaType }) {
   const [items, setItems] = useState<MediaItem[]>([])
@@ -22,15 +35,12 @@ export function BrowsePage({ mediaType }: { mediaType: MediaType }) {
       try {
         const response = await getPopular(mediaType, nextPage, signal)
         const normalized = normalizeMediaList(response.results, mediaType)
-        setItems((current) => {
-          const combined = append ? [...current, ...normalized] : normalized
-          return [...new Map(combined.map((item) => [`${item.mediaType}-${item.id}`, item])).values()]
-        })
+        setItems((current) => uniqueMedia(append ? [...current, ...normalized] : normalized))
         setPage(response.page)
-        setTotalPages(Math.min(response.total_pages, 500))
+        setTotalPages(pageLimit(response.total_pages))
       } catch (caught) {
         if (signal?.aborted) return
-        setError(caught instanceof Error ? caught.message : 'Unable to load titles.')
+        setError(errorMessage(caught, 'Unable to load titles.'))
       } finally {
         if (!signal?.aborted) {
           setLoading(false)
@@ -49,11 +59,7 @@ export function BrowsePage({ mediaType }: { mediaType: MediaType }) {
     return () => controller.abort()
   }, [loadPage])
 
-  const title = mediaType === 'movie' ? 'Popular movies' : 'Popular TV shows'
-  const description =
-    mediaType === 'movie'
-      ? 'Explore the movies audiences are discovering on TMDB right now.'
-      : 'Explore the TV series audiences are discovering on TMDB right now.'
+  const { title, description } = COPY[mediaType]
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
@@ -72,22 +78,9 @@ export function BrowsePage({ mediaType }: { mediaType: MediaType }) {
           <p className="rounded-2xl border border-white/8 bg-white/4 p-8 text-center text-zinc-400">No titles are available right now.</p>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              {items.map((item) => <MediaCard key={`${item.mediaType}-${item.id}`} item={item} />)}
-            </div>
+            <MediaGrid items={items} />
             {error && <div className="mt-8"><ErrorMessage message={error} compact /></div>}
-            {page < totalPages && (
-              <div className="mt-10 flex justify-center">
-                <button
-                  type="button"
-                  disabled={loadingMore}
-                  onClick={() => void loadPage(page + 1, true)}
-                  className="min-h-12 rounded-xl bg-white px-6 font-black text-zinc-950 transition hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-60"
-                >
-                  {loadingMore ? 'Loading…' : 'Load more'}
-                </button>
-              </div>
-            )}
+            {page < totalPages && <LoadMoreButton loading={loadingMore} label="Load more" onClick={() => void loadPage(page + 1, true)} />}
           </>
         )}
       </div>

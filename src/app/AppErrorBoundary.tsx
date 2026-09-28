@@ -1,15 +1,12 @@
 import { Component, type ReactNode } from 'react'
 import { Link } from 'react-router'
 
+/** Replaces a crashed page with a way home, without exposing runtime details to visitors. */
 export class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
 
   static getDerivedStateFromError() {
     return { failed: true }
-  }
-
-  componentDidCatch() {
-    // The UI recovers without exposing runtime details to visitors.
   }
 
   render() {
@@ -19,7 +16,13 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, { faile
           <div>
             <h1 className="text-3xl font-black">Fedora Movies hit an unexpected problem</h1>
             <p className="mt-4 text-zinc-400">Reload the page to try again. Your account favourites remain safely synced.</p>
-            <Link to="/" onClick={() => this.setState({ failed: false })} className="mt-6 inline-flex min-h-12 items-center rounded-xl bg-white px-5 font-black text-zinc-950">Return home</Link>
+            <Link
+              to="/"
+              onClick={() => this.setState({ failed: false })}
+              className="mt-6 inline-flex min-h-12 items-center rounded-xl bg-white px-5 font-black text-zinc-950"
+            >
+              Return home
+            </Link>
           </div>
         </div>
       )

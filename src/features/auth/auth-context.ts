@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { ViewerAccount } from '../../types/account'
 
-export interface AuthContextValue {
+interface AuthContextValue {
   account: ViewerAccount | null
   loading: boolean
   login: (username: string, password: string) => Promise<ViewerAccount>

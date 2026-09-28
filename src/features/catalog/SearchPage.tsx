@@ -1,20 +1,22 @@
 import { Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { searchMulti } from './api'
 import { ErrorMessage } from '../../components/ui/ErrorMessage'
 import { GridSkeleton } from '../../components/ui/LoadingSkeleton'
-import { MediaCard } from './MediaCard'
 import { SearchBar } from '../../components/ui/SearchBar'
 import { useDebounce } from '../../hooks/useDebounce'
+import { errorMessage } from '../../lib/errors'
 import type { MediaItem } from '../../types/tmdb'
+import { searchMulti } from './api'
 import { normalizeMediaList } from './media'
+import { LoadMoreButton, MediaGrid } from './MediaGrid'
+import { pageLimit, uniqueMedia } from './pagination'
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const urlQuery = searchParams.get('q') ?? ''
-  const input = urlQuery
-  const debouncedQuery = useDebounce(input.trim(), 350)
+  // The URL is the single source of truth, so searches are shareable and survive reloads.
+  const query = searchParams.get('q') ?? ''
+  const debouncedQuery = useDebounce(query.trim(), 350)
   const [items, setItems] = useState<MediaItem[]>([])
   const [page, setPage] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
@@ -44,11 +46,11 @@ export function SearchPage() {
       .then((response) => {
         setItems(normalizeMediaList(response.results))
         setPage(response.page)
-        setTotalPages(Math.min(response.total_pages, 500))
+        setTotalPages(pageLimit(response.total_pages))
       })
       .catch((caught: unknown) => {
         if (controller.signal.aborted) return
-        setError(caught instanceof Error ? caught.message : 'Search failed. Please try again.')
+        setError(errorMessage(caught, 'Search failed. Please try again.'))
         setItems([])
       })
       .finally(() => {
@@ -74,14 +76,11 @@ export function SearchPage() {
     setError(null)
     try {
       const response = await searchMulti(debouncedQuery, page + 1, controller.signal)
-      setItems((current) => {
-        const combined = [...current, ...normalizeMediaList(response.results)]
-        return [...new Map(combined.map((item) => [`${item.mediaType}-${item.id}`, item])).values()]
-      })
+      setItems((current) => uniqueMedia([...current, ...normalizeMediaList(response.results)]))
       setPage(response.page)
-      setTotalPages(Math.min(response.total_pages, 500))
+      setTotalPages(pageLimit(response.total_pages))
     } catch (caught) {
-      if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'Search failed.')
+      if (!controller.signal.aborted) setError(errorMessage(caught, 'Search failed.'))
     } finally {
       if (!controller.signal.aborted) setLoadingMore(false)
     }
@@ -93,7 +92,7 @@ export function SearchPage() {
         <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-400">Search TMDB</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">Find movies and TV shows</h1>
         <div className="mt-6 sm:mt-8">
-          <SearchBar value={input} onChange={updateQuery} />
+          <SearchBar value={query} onChange={updateQuery} />
         </div>
       </header>
 
@@ -119,22 +118,9 @@ export function SearchPage() {
               <h2 className="text-xl font-black">Results for “{debouncedQuery}”</h2>
               <span className="text-sm text-zinc-500">Movies and TV shows</span>
             </div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              {items.map((item) => <MediaCard key={`${item.mediaType}-${item.id}`} item={item} />)}
-            </div>
+            <MediaGrid items={items} />
             {error && <div className="mt-8"><ErrorMessage message={error} compact /></div>}
-            {page < totalPages && (
-              <div className="mt-10 flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => void loadMore()}
-                  disabled={loadingMore}
-                  className="min-h-12 rounded-xl bg-white px-6 font-black text-zinc-950 transition hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-60"
-                >
-                  {loadingMore ? 'Loading…' : 'Load more results'}
-                </button>
-              </div>
-            )}
+            {page < totalPages && <LoadMoreButton loading={loadingMore} label="Load more results" onClick={() => void loadMore()} />}
           </>
         )}
       </div>

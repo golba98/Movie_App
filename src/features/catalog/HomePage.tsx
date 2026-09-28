@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
+import { useRequest } from '../../hooks/useRequest'
+import { ContinueWatchingRow } from '../watch-history/ContinueWatchingRow'
 import {
   getMovieDetails,
   getPopularMovies,
@@ -7,12 +9,10 @@ import {
   getTrendingMovies,
   getUpcomingMovies,
 } from './api'
-import { ContinueWatchingRow } from '../watch-history/ContinueWatchingRow'
 import { Hero } from './Hero'
+import { chooseTrailer, normalizeMediaList } from './media'
 import { MediaRow } from './MediaRow'
 import { TrailerModal } from './TrailerModal'
-import { useRequest } from '../../hooks/useRequest'
-import { chooseTrailer, normalizeMediaList } from './media'
 
 export function HomePage() {
   const trending = useRequest(getTrendingMovies)
@@ -28,9 +28,9 @@ export function HomePage() {
     [trending.data],
   )
   const featured = trendingItems.find((item) => item.backdropPath) ?? trendingItems[0] ?? null
+  // The trending list has no videos, so the featured trailer needs the full details.
   const featuredLoader = useCallback(
-    (signal: AbortSignal) =>
-      featured ? getMovieDetails(featured.id, signal) : Promise.resolve(null),
+    (signal: AbortSignal) => (featured ? getMovieDetails(featured.id, signal) : Promise.resolve(null)),
     [featured],
   )
   const featuredDetails = useRequest(featuredLoader)

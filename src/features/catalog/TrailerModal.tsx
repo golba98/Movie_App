@@ -1,37 +1,13 @@
 import { X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
+import { useModalDialog } from '../../hooks/useModalDialog'
 import type { Video } from '../../types/tmdb'
 
-export function TrailerModal({
-  trailer,
-  onClose,
-}: {
-  trailer: Video | null
-  onClose: () => void
-}) {
+/** Plays a YouTube trailer in a modal; renders nothing while `trailer` is null. */
+export function TrailerModal({ trailer, onClose }: { trailer: Video | null; onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
-  const previousFocusRef = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (!trailer) return
-    const dialog = dialogRef.current
-    if (!dialog) return
-
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    dialog.showModal()
-    closeButtonRef.current?.focus()
-
-    return () => {
-      document.body.style.overflow = previousOverflow
-      if (dialog.open) dialog.close()
-      window.requestAnimationFrame(() => {
-        if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus()
-      })
-    }
-  }, [trailer])
+  useModalDialog(Boolean(trailer), dialogRef, closeButtonRef)
 
   if (!trailer) return null
 

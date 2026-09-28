@@ -6,6 +6,7 @@ import type {
   TvDetails,
   Video,
   WatchProvider,
+  WatchProviderRegion,
 } from '../../types/tmdb'
 
 function normalizeMedia(item: TmdbMediaResult, fallbackType?: MediaType): MediaItem | null {
@@ -64,10 +65,26 @@ export function chooseTrailer(videos: Video[] | undefined) {
   )
 }
 
-export function dedupeProviders(providers: WatchProvider[] = []) {
+function dedupeProviders(providers: WatchProvider[] = []) {
   return [...new Map(providers.map((provider) => [provider.provider_id, provider])).values()].sort(
     (a, b) => (a.display_priority ?? 999) - (b.display_priority ?? 999),
   )
 }
 
 export const mediaPath = (item: Pick<MediaItem, 'id' | 'mediaType'>) => `/${item.mediaType}/${item.id}`
+
+export function providerGroups(providers?: WatchProviderRegion) {
+  if (!providers) return []
+  return [
+    {
+      label: 'Stream, free or with ads',
+      items: dedupeProviders([...(providers.flatrate ?? []), ...(providers.free ?? []), ...(providers.ads ?? [])]),
+    },
+    { label: 'Rent', items: dedupeProviders(providers.rent) },
+    { label: 'Buy', items: dedupeProviders(providers.buy) },
+  ].filter((group) => group.items.length > 0)
+}
+
+export function hasWatchProviders(providers?: WatchProviderRegion) {
+  return providerGroups(providers).length > 0
+}

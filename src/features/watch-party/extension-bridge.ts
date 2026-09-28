@@ -1,8 +1,14 @@
+import { isRecord } from '../../lib/is-record'
+import { roomSocketUrl } from './api'
+
+// The window.postMessage protocol between a room page and the companion
+// browser extension's content script.
 export const WATCH_SYNC_BRIDGE_VERSION = 1 as const
 export const WATCH_SYNC_WEBSITE_SOURCE = 'fedora-movies-watch-party' as const
-export const WATCH_SYNC_EXTENSION_SOURCE = 'fedora-movies-watch-sync-extension' as const
+const WATCH_SYNC_EXTENSION_SOURCE = 'fedora-movies-watch-sync-extension' as const
 
-export type ExtensionBridgeStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
+const BRIDGE_STATUSES = ['idle', 'connecting', 'connected', 'reconnecting', 'disconnected', 'error'] as const
+export type ExtensionBridgeStatus = typeof BRIDGE_STATUSES[number]
 
 export type ExtensionBridgeMessage =
   | {
@@ -28,7 +34,7 @@ export type ExtensionBridgeMessage =
       clientSessionId: string
     }
 
-export type WebsiteBridgeMessage =
+type WebsiteBridgeMessage =
   | {
       source: typeof WATCH_SYNC_WEBSITE_SOURCE
       type: 'website:hello'
@@ -51,6 +57,7 @@ export type WebsiteBridgeMessage =
       clientSessionId: string
     }
 
+// Nonces and session ids are random URL-safe strings.
 function isBridgeId(value: unknown) {
   return typeof value === 'string'
     && value.length >= 16
@@ -59,7 +66,7 @@ function isBridgeId(value: unknown) {
 }
 
 export function isExtensionBridgeMessage(value: unknown): value is ExtensionBridgeMessage {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  if (!isRecord(value)) return false
   const candidate = value as Partial<ExtensionBridgeMessage>
   if (candidate.source !== WATCH_SYNC_EXTENSION_SOURCE || candidate.protocolVersion !== WATCH_SYNC_BRIDGE_VERSION) return false
   if (candidate.type === 'extension:hello' || candidate.type === 'extension:token-request') {
@@ -69,13 +76,15 @@ export function isExtensionBridgeMessage(value: unknown): value is ExtensionBrid
     return isBridgeId(candidate.clientSessionId)
       && typeof candidate.message === 'string'
       && candidate.message.length <= 240
-      && ['idle', 'connecting', 'connected', 'reconnecting', 'disconnected', 'error'].includes(candidate.status ?? '')
+      && (BRIDGE_STATUSES as readonly string[]).includes(candidate.status ?? '')
   }
   return false
 }
 
 export function extensionSocketUrl(roomId: string) {
-  const url = new URL(`/api/watch-party/rooms/${encodeURIComponent(roomId)}/extension-socket`, window.location.origin)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  return url.toString()
+  return roomSocketUrl(roomId, 'extension-socket')
+}
+
+export function postToExtension(message: WebsiteBridgeMessage) {
+  window.postMessage(message, window.location.origin)
 }

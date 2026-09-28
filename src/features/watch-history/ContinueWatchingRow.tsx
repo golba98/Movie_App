@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import { getMovieDetails, getTvDetails } from '../catalog/api'
-import { useWatchedHistory } from './watch-history-context'
 import { detailsToMediaItem } from '../catalog/media'
 import { MediaRow } from '../catalog/MediaRow'
+import { useWatchedHistory } from './watch-history-context'
 
 const MAX_ITEMS = 20
 const MAX_BACKFILL_REQUESTS = 12

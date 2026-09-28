@@ -2,7 +2,7 @@ import { apiRequest } from '../../lib/api-client'
 import type { EmbedBlockReason, MediaSource } from '../../types/media-source'
 import type { MediaType } from '../../types/tmdb'
 
-export interface ExtractedPlayer {
+interface ExtractedPlayer {
   extractedUrl: string | null
   embedBlocked?: EmbedBlockReason | null
 }

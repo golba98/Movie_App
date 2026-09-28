@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WatchPartyClientRequest, WatchPartyState } from '../../types/watch-party'
+import { roomSocketUrl } from './api'
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 
-function websocketUrl(roomId: string, accessToken: string) {
-  const url = new URL(`/api/watch-party/rooms/${encodeURIComponent(roomId)}/socket`, window.location.origin)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.searchParams.set('access', accessToken)
-  return url.toString()
-}
+const SYNC_REQUEST_INTERVAL_MS = 4_000
+const RECONNECT_BASE_MS = 500
+const RECONNECT_MAX_MS = 10_000
 
+const reconnectDelay = (attempts: number) => Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(attempts, 4))
+
+/**
+ * A live connection to a watch party room. Reconnects with backoff, and asks
+ * for the authoritative state periodically and whenever the tab returns.
+ */
 export function useWatchParty(roomId: string, accessToken: string | null, initialState: WatchPartyState | null) {
   const [state, setState] = useState<WatchPartyState | null>(initialState)
   const [connection, setConnection] = useState<ConnectionState>('disconnected')
@@ -32,7 +36,7 @@ export function useWatchParty(roomId: string, accessToken: string | null, initia
     const connect = () => {
       if (stopped) return
       setConnection(attempts ? 'reconnecting' : 'connecting')
-      const socket = new WebSocket(websocketUrl(roomId, accessToken))
+      const socket = new WebSocket(roomSocketUrl(roomId, 'socket', { access: accessToken }))
       socketRef.current = socket
       socket.onopen = () => {
         attempts = 0
@@ -40,7 +44,7 @@ export function useWatchParty(roomId: string, accessToken: string | null, initia
       }
       socket.onmessage = (event) => {
         try {
-          const message = JSON.parse(String(event.data)) as { type?: string; state?: WatchPartyState }
+          const message = JSON.parse(String(event.data)) as { state?: WatchPartyState }
           if (message.state) setState(message.state)
         } catch {
           // Ignore malformed server messages; the next sync request restores state.
@@ -50,7 +54,7 @@ export function useWatchParty(roomId: string, accessToken: string | null, initia
         if (stopped) return
         attempts += 1
         setConnection('reconnecting')
-        retryRef.current = window.setTimeout(connect, Math.min(10_000, 500 * 2 ** Math.min(attempts, 4)))
+        retryRef.current = window.setTimeout(connect, reconnectDelay(attempts))
       }
       socket.onerror = () => socket.close()
     }
@@ -63,6 +67,7 @@ export function useWatchParty(roomId: string, accessToken: string | null, initia
     }
   }, [accessToken, roomId])
 
+  // Returns false when the socket is not open, so nothing was sent.
   const send = useCallback((event: WatchPartyClientRequest) => {
     const socket = socketRef.current
     const current = stateRef.current
@@ -73,18 +78,17 @@ export function useWatchParty(roomId: string, accessToken: string | null, initia
 
   useEffect(() => {
     if (!accessToken) return
-    const interval = window.setInterval(() => {
-      void send({ type: 'room:sync-request' })
-    }, 4_000)
-    const visible = () => {
-      if (document.visibilityState === 'visible') void send({ type: 'room:sync-request' })
+    const requestSync = () => send({ type: 'room:sync-request' })
+    const interval = window.setInterval(requestSync, SYNC_REQUEST_INTERVAL_MS)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') requestSync()
     }
-    document.addEventListener('visibilitychange', visible)
+    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       window.clearInterval(interval)
-      document.removeEventListener('visibilitychange', visible)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [accessToken, send])
 
-  return { state, setState, connection, send }
+  return { state, connection, send }
 }
