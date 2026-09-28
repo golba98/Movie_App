@@ -1,78 +1,49 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { apiRequest } from '../../lib/api-client'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { AUTH_EXPIRED_EVENT } from '../../lib/api-client'
 import type { ViewerAccount } from '../../types/account'
+import * as authApi from './api'
+import { AuthContext } from './auth-context'
 
-interface AuthContextValue {
-  account: ViewerAccount | null
-  loading: boolean
-  login: (username: string, password: string) => Promise<ViewerAccount>
-  logout: () => Promise<void>
-  changePassword: (currentPassword: string, newPassword: string) => Promise<ViewerAccount>
-  refresh: () => Promise<void>
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null)
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<ViewerAccount | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(async () => {
-    try {
-      const response = await apiRequest<{ account: ViewerAccount }>('/api/auth/session')
-      setAccount(response.account)
-    } catch {
-      setAccount(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    authApi.getSession()
+      .then((response) => setAccount(response.account))
+      .catch(() => setAccount(null))
+      .finally(() => setLoading(false))
+  }, [])
 
   useEffect(() => {
     const expire = () => setAccount(null)
-    window.addEventListener('fedora:auth-expired', expire)
-    return () => window.removeEventListener('fedora:auth-expired', expire)
+    window.addEventListener(AUTH_EXPIRED_EVENT, expire)
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, expire)
   }, [])
 
   const login = useCallback(async (username: string, password: string) => {
-    const response = await apiRequest<{ account: ViewerAccount }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    })
-    setAccount(response.account)
-    return response.account
+    const { account } = await authApi.login(username, password)
+    setAccount(account)
+    return account
   }, [])
 
   const logout = useCallback(async () => {
     try {
-      await apiRequest('/api/auth/logout', { method: 'POST', body: '{}' })
+      await authApi.logout()
     } finally {
       setAccount(null)
     }
   }, [])
 
   const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
-    const response = await apiRequest<{ account: ViewerAccount }>('/api/auth/change-password', {
-      method: 'POST',
-      body: JSON.stringify({ currentPassword, newPassword }),
-    })
-    setAccount(response.account)
-    return response.account
+    const { account } = await authApi.changePassword(currentPassword, newPassword)
+    setAccount(account)
+    return account
   }, [])
 
   const value = useMemo(
-    () => ({ account, loading, login, logout, changePassword, refresh }),
-    [account, changePassword, loading, login, logout, refresh],
+    () => ({ account, loading, login, logout, changePassword }),
+    [account, changePassword, loading, login, logout],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (!context) throw new Error('useAuth must be used within AuthProvider')
-  return context
 }

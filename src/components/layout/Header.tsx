@@ -1,6 +1,6 @@
 import { LogOut } from 'lucide-react'
 import { NavLink } from 'react-router'
-import { useAuth } from '../../features/auth/AuthProvider'
+import { useAuth } from '../../features/auth/auth-context'
 import { Logo } from './Logo'
 
 const links = [

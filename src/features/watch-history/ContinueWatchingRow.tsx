@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { getMovieDetails, getTvDetails } from '../catalog/api'
-import { useWatchedHistory } from './WatchHistoryProvider'
+import { useWatchedHistory } from './watch-history-context'
 import { detailsToMediaItem } from '../catalog/media'
 import { MediaRow } from '../catalog/MediaRow'
 

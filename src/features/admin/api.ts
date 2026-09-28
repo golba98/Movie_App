@@ -1,10 +1,5 @@
-import type { AdminMediaSource, MediaSource, MediaSourceInput, SearchProvider, SearchProviderInput } from '../../types/media-source'
-import type { MediaType } from '../../types/tmdb'
 import { apiRequest } from '../../lib/api-client'
-
-export function getMediaSources(mediaType: MediaType, tmdbId: number, signal?: AbortSignal) {
-  return apiRequest<{ sources: MediaSource[] }>(`/api/media-sources/${mediaType}/${tmdbId}`, { signal })
-}
+import type { AdminMediaSource, MediaSourceInput, SearchProvider, SearchProviderInput } from '../../types/media-source'
 
 export function getAdminMediaSources(search = '') {
   return apiRequest<{ sources: AdminMediaSource[] }>(

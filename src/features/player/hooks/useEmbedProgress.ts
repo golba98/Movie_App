@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
+import { isRecord } from '../../../lib/is-record'
 
 export interface EmbedProgress {
   position: number
@@ -10,14 +11,10 @@ function toNumber(value: unknown) {
   return typeof number === 'number' && Number.isFinite(number) ? number : null
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
 // Embedded providers report progress in different shapes, e.g.
 // { type: 'PLAYER_EVENT', data: { event: 'timeupdate', currentTime, duration } },
 // { currentTime, duration }, { timestamp, duration } or { progress: 0-100, duration }.
-export function parseEmbedProgress(raw: unknown): EmbedProgress | null {
+function parseEmbedProgress(raw: unknown): EmbedProgress | null {
   let data = raw
   if (typeof data === 'string') {
     try {

@@ -1,6 +1,6 @@
 import { LoaderCircle } from 'lucide-react'
 import { Navigate, Outlet, useLocation } from 'react-router'
-import { useAuth } from './AuthProvider'
+import { useAuth } from './auth-context'
 
 export function RequireViewer() {
   const { account, loading } = useAuth()

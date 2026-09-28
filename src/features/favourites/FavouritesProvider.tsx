@@ -1,24 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { apiRequest } from '../../lib/api-client'
-import type { FavouriteItem, MediaItem } from '../../types/tmdb'
-import { useAuth } from '../auth/AuthProvider'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { errorMessage } from '../../lib/errors'
+import type { FavouriteItem } from '../../types/favourite'
+import type { MediaItem } from '../../types/tmdb'
+import { useAuth } from '../auth/auth-context'
+import * as favouritesApi from './api'
+import { FavouritesContext } from './favourites-context'
 
-const STORAGE_KEY = 'cinescope:favourites:v1'
+// Favourites saved on this device before they were stored on the account.
+const LEGACY_STORAGE_KEY = 'cinescope:favourites:v1'
 
-interface FavouritesContextValue {
-  favourites: FavouriteItem[]
-  loading: boolean
-  error: string | null
-  legacyCount: number
-  importing: boolean
-  isFavourite: (item: Pick<MediaItem, 'id' | 'mediaType'>) => boolean
-  toggleFavourite: (item: MediaItem) => Promise<void>
-  removeFavourite: (item: Pick<MediaItem, 'id' | 'mediaType'>) => Promise<void>
-  importLegacy: () => Promise<void>
-  dismissLegacy: () => void
-}
-
-const FavouritesContext = createContext<FavouritesContextValue | null>(null)
+const itemKey = (item: Pick<MediaItem, 'id' | 'mediaType'>) => `${item.mediaType}:${item.id}`
 
 function isStoredFavourite(value: unknown): value is FavouriteItem {
   if (!value || typeof value !== 'object') return false
@@ -34,16 +25,14 @@ function isStoredFavourite(value: unknown): value is FavouriteItem {
 
 function readLegacyFavourites() {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+    const parsed: unknown = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) ?? '[]')
     return Array.isArray(parsed) ? parsed.filter(isStoredFavourite) : []
   } catch {
     return []
   }
 }
 
-const itemKey = (item: Pick<MediaItem, 'id' | 'mediaType'>) => `${item.mediaType}:${item.id}`
-
-export function FavouritesProvider({ children }: { children: React.ReactNode }) {
+export function FavouritesProvider({ children }: { children: ReactNode }) {
   const { account } = useAuth()
   const [favourites, setFavourites] = useState<FavouriteItem[]>([])
   const [legacy, setLegacy] = useState<FavouriteItem[]>(readLegacyFavourites)
@@ -61,12 +50,12 @@ export function FavouritesProvider({ children }: { children: React.ReactNode }) 
     let cancelled = false
     setLoading(true)
     setError(null)
-    apiRequest<{ favourites: FavouriteItem[] }>('/api/favourites')
+    favouritesApi.getFavourites()
       .then((response) => {
         if (!cancelled) setFavourites(response.favourites)
       })
       .catch((caught: unknown) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : 'Unable to load favourites.')
+        if (!cancelled) setError(errorMessage(caught, 'Unable to load favourites.'))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -82,62 +71,53 @@ export function FavouritesProvider({ children }: { children: React.ReactNode }) 
     [favourites],
   )
 
-  const removeFavourite = useCallback(
-    async (item: Pick<MediaItem, 'id' | 'mediaType'>) => {
-      const previous = favourites
-      setFavourites((current) => current.filter((favourite) => itemKey(favourite) !== itemKey(item)))
-      setError(null)
-      try {
-        await apiRequest(`/api/favourites/${item.mediaType}/${item.id}`, { method: 'DELETE' })
-      } catch (caught) {
-        setFavourites(previous)
-        setError(caught instanceof Error ? caught.message : 'Unable to remove that favourite.')
-      }
-    },
-    [favourites],
-  )
-
+  // Updates optimistically and rolls back if the account rejects the change.
   const toggleFavourite = useCallback(
     async (item: MediaItem) => {
-      const existing = favourites.some((favourite) => itemKey(favourite) === itemKey(item))
-      if (existing) return removeFavourite(item)
-      const favourite = { ...item, addedAt: Date.now() }
       const previous = favourites
-      setFavourites((current) => [favourite, ...current])
       setError(null)
+      if (isFavourite(item)) {
+        setFavourites((current) => current.filter((favourite) => itemKey(favourite) !== itemKey(item)))
+        try {
+          await favouritesApi.removeFavourite(item)
+        } catch (caught) {
+          setFavourites(previous)
+          setError(errorMessage(caught, 'Unable to remove that favourite.'))
+        }
+        return
+      }
+
+      const favourite = { ...item, addedAt: Date.now() }
+      setFavourites((current) => [favourite, ...current])
       try {
-        await apiRequest(`/api/favourites/${item.mediaType}/${item.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(favourite),
-        })
+        await favouritesApi.saveFavourite(favourite)
       } catch (caught) {
         setFavourites(previous)
-        setError(caught instanceof Error ? caught.message : 'Unable to save that favourite.')
+        setError(errorMessage(caught, 'Unable to save that favourite.'))
       }
     },
-    [favourites, removeFavourite],
+    [favourites, isFavourite],
   )
 
   const importLegacy = useCallback(async () => {
     setImporting(true)
     setError(null)
     try {
-      await apiRequest('/api/favourites/import', {
-        method: 'POST',
-        body: JSON.stringify({ favourites: legacy }),
-      })
+      await favouritesApi.importFavourites(legacy)
       setFavourites((current) => {
         const combined = [...legacy, ...current]
         return [...new Map(combined.map((item) => [itemKey(item), item])).values()]
       })
-      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
       setLegacy([])
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to import favourites.')
+      setError(errorMessage(caught, 'Unable to import favourites.'))
     } finally {
       setImporting(false)
     }
   }, [legacy])
+
+  const dismissLegacy = useCallback(() => setLegacyDismissed(true), [])
 
   const value = useMemo(
     () => ({
@@ -148,29 +128,11 @@ export function FavouritesProvider({ children }: { children: React.ReactNode }) 
       importing,
       isFavourite,
       toggleFavourite,
-      removeFavourite,
       importLegacy,
-      dismissLegacy: () => setLegacyDismissed(true),
+      dismissLegacy,
     }),
-    [
-      error,
-      favourites,
-      importLegacy,
-      importing,
-      isFavourite,
-      legacy.length,
-      legacyDismissed,
-      loading,
-      removeFavourite,
-      toggleFavourite,
-    ],
+    [dismissLegacy, error, favourites, importLegacy, importing, isFavourite, legacy.length, legacyDismissed, loading, toggleFavourite],
   )
 
   return <FavouritesContext.Provider value={value}>{children}</FavouritesContext.Provider>
-}
-
-export function useFavourites() {
-  const context = useContext(FavouritesContext)
-  if (!context) throw new Error('useFavourites must be used within FavouritesProvider')
-  return context
 }

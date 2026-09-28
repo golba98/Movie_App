@@ -1,106 +1,24 @@
-import {
-  AlertCircle,
-  Check,
-  ChevronDown,
-  Info,
-  Maximize2,
-  Minimize2,
-  Pause,
-  Play,
-  RotateCw,
-  Volume2,
-  VolumeX,
-  X,
-} from 'lucide-react'
+import { AlertCircle, Minimize2, RotateCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { apiRequest } from '../../lib/api-client'
-import { getTvSeasonDetails } from '../catalog/api'
+import type { MediaSource } from '../../types/media-source'
+import type { MediaItem, MediaType } from '../../types/tmdb'
+import { useWatchedHistory } from '../watch-history/watch-history-context'
+import { withStartTime } from './episodes'
+import { useEpisodeSelection } from './hooks/useEpisodeSelection'
+import { useSourcePlayback } from './hooks/useSourcePlayback'
 import { useTheaterFullscreen } from './hooks/useTheaterFullscreen'
+import { useTheaterMode } from './hooks/useTheaterMode'
 import { useVideoDiagnostics } from './hooks/useVideoDiagnostics'
-import { useEmbedProgress } from './hooks/useEmbedProgress'
-import { usePlaybackWatcher, type WatcherUpdateReason } from './hooks/usePlaybackWatcher'
-import { MIN_COUNTED_WATCH_SECONDS, useWatchedHistory, WATCHED_THRESHOLD } from '../watch-history/WatchHistoryProvider'
-import type { EmbedBlockReason, MediaSource } from '../../types/media-source'
-import type { Episode, MediaItem, MediaType } from '../../types/tmdb'
-import { imageUrl } from '../../lib/images'
-import { resolveStartEpisode, withStartTime } from '../catalog/media'
-import {
-  logIframeConfiguration,
-  PLAYER_IFRAME_ALLOW,
-  PLAYER_IFRAME_REFERRER_POLICY,
-  playerDebug,
-  urlHost,
-} from './player-debug'
+import { useWatchProgress } from './hooks/useWatchProgress'
+import { DynamicPlayerStage, type DynamicStage } from './parts/DynamicPlayerStage'
+import { EmptyPlayer } from './parts/EmptyPlayer'
+import { EpisodeSidebar } from './parts/EpisodeSidebar'
+import { NativeVideoPlayer } from './parts/NativeVideoPlayer'
+import { PlayerToolbar } from './parts/PlayerToolbar'
+import { SourceSwitcher } from './parts/SourceSwitcher'
+import { episodeListings, getSourceLabel, playableSourcesFor } from './sources'
 
-const EXTRACTION_TIMEOUT_MS = 15_000
-const IFRAME_LOAD_TIMEOUT_MS = 12_000
-const IFRAME_REVEAL_DELAY_MS = 180
-const PROGRESS_SAVE_INTERVAL_MS = 5_000
-// Saved positions outside this window restart the title instead of resuming.
-const MIN_RESUME_SECONDS = 10
-const MAX_RESUME_SHARE = 0.95
-
-type SourceFailureReason = 'no-player' | 'extract-timeout' | 'extract-error' | 'load-timeout' | 'embed-blocked' | 'media-error'
-
-// Each source keeps its own player state so one failing source never
-// clobbers another one's progress or error.
-type SourcePlayerState =
-  | { status: 'extracting' }
-  | { status: 'ready'; extractedUrl: string }
-  | { status: 'failed'; reason: SourceFailureReason; message: string }
-
-const SOURCE_FAILURE_MESSAGES: Record<SourceFailureReason, string> = {
-  'no-player': 'This source did not return a usable embedded player. You can retry or exit safely.',
-  'extract-timeout': 'The player took too long to prepare. You can retry or exit safely.',
-  'extract-error': 'The player could not be prepared. You can retry or exit safely.',
-  'load-timeout': 'The embedded player did not finish loading. You can retry or stop safely.',
-  'embed-blocked': "This provider doesn't allow its player to be embedded here. Try another source.",
-  'media-error': 'The authorised video could not be loaded. Check the source format and host response.',
-}
-
-function withoutSource(states: Record<string, SourcePlayerState>, sourceId: string) {
-  if (!(sourceId in states)) return states
-  const next = { ...states }
-  delete next[sourceId]
-  return next
-}
-
-function getSourceLabel(source: MediaSource) {
-  const cleanLabel = source.label.replace(' Stream (Dynamic)', '')
-  if (cleanLabel.toLowerCase().includes('flixbaba')) {
-    return 'Source 1'
-  }
-  if (cleanLabel.toLowerCase().includes('soap2day')) {
-    return 'Source 2'
-  }
-  return cleanLabel
-}
-
-function isDynamicSource(source: MediaSource | undefined) {
-  if (!source) return false
-  const sourceUrl = source.sourceUrl.toLowerCase()
-  return Boolean(source.isDynamic || sourceUrl.includes('flixbaba') || sourceUrl.includes('soap2day'))
-}
-
-function isEmbeddableUrl(candidate: string | null, wrapperUrl: string): candidate is string {
-  if (!candidate) return false
-  try {
-    const extracted = new URL(candidate)
-    const wrapper = new URL(wrapperUrl, window.location.origin)
-    return extracted.protocol === 'https:'
-      && extracted.href !== wrapper.href
-  } catch {
-    return false
-  }
-}
-
-function formatPlaybackTime(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
-  const totalSeconds = Math.floor(seconds)
-  const minutes = Math.floor(totalSeconds / 60)
-  const remainingSeconds = totalSeconds % 60
-  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
-}
+const THEATER_BUTTON = 'absolute top-4 z-20 grid size-11 place-items-center rounded-full bg-black/70 text-zinc-200 ring-1 ring-white/15 backdrop-blur transition hover:bg-black/90 hover:text-white'
 
 interface StreamingPlayerProps {
   id: number
@@ -126,577 +44,103 @@ export function StreamingPlayer({
   theaterMode,
   onTheaterModeChange,
 }: StreamingPlayerProps) {
-  const {
-    isEpisodeWatched,
-    toggleEpisodeWatched,
-    isMovieWatched,
-    getResumeTarget,
-    getProgress,
-    getEntry,
-    recordWatch,
-  } = useWatchedHistory()
+  const isTv = mediaType === 'tv'
+  const { isEpisodeWatched, toggleEpisodeWatched } = useWatchedHistory()
+  const selection = useEpisodeSelection(id, mediaType, sources, numberOfSeasons)
+  const { season, episode } = selection
 
-  const computeStartEpisode = () => {
-    if (mediaType !== 'tv') return { seasonNumber: 1, episodeNumber: 1 }
-    const target = getResumeTarget(id)
-    const targetWatched = target ? isEpisodeWatched(id, target.seasonNumber, target.episodeNumber) : false
-    return resolveStartEpisode(sources, target, targetWatched)
-  }
-
-  const [initialStart] = useState(computeStartEpisode)
-  const [activeSeason, setActiveSeason] = useState(initialStart.seasonNumber)
-  const [activeEpisode, setActiveEpisode] = useState(initialStart.episodeNumber)
-
-  const availableSeasons = useMemo(() => {
-    const hasDynamic = sources.some((source) => source.isDynamic)
-    if (hasDynamic && numberOfSeasons) {
-      return Array.from({ length: numberOfSeasons }, (_, i) => i + 1)
-    }
-    return [...new Set(sources.flatMap((source) => source.seasonNumber ?? []))].sort((a, b) => a - b)
-  }, [sources, numberOfSeasons])
-
-  const [seasonDropdownOpen, setSeasonDropdownOpen] = useState(false)
-  const [episodes, setEpisodes] = useState<Episode[]>([])
-  const [loadingEpisodes, setLoadingEpisodes] = useState(mediaType === 'tv')
-  const [episodesError, setEpisodesError] = useState<string | null>(null)
-  const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
-  const [sourceStates, setSourceStates] = useState<Record<string, SourcePlayerState>>({})
-  const [extractionAttempt, setExtractionAttempt] = useState(0)
   const [inlinePlaybackRequested, setInlinePlaybackRequested] = useState(false)
-  const [loadedIframeKey, setLoadedIframeKey] = useState<string | null>(null)
-  const [videoCurrentTime, setVideoCurrentTime] = useState(0)
-  const [videoDuration, setVideoDuration] = useState(0)
+  const [mediaError, setMediaError] = useState<{ sourceId: string; message: string } | null>(null)
   const [videoPlaying, setVideoPlaying] = useState(false)
-  const [videoMuted, setVideoMuted] = useState(false)
-  const [videoVolume, setVideoVolume] = useState(1)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
   const playerShellRef = useRef<HTMLDivElement>(null)
   const exitButtonRef = useRef<HTMLButtonElement>(null)
-  const returnFocusRef = useRef<HTMLElement | null>(null)
-  const iframeRevealTimerRef = useRef<number | null>(null)
-  const sourceStatesRef = useRef(sourceStates)
-  const previousActiveSourceIdRef = useRef<string | null>(null)
 
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
-  const [iframeStart, setIframeStart] = useState<{ key: string; src: string } | null>(null)
-  // Bumped by "Reload player" to remount a provider player that got stuck.
-  const [playerReload, setPlayerReload] = useState(0)
-
-  useEffect(() => {
-    sourceStatesRef.current = sourceStates
-  }, [sourceStates])
-
-  useEffect(() => {
-    setSelectedSourceId(null)
-    setSourceStates({})
-    setLoadedIframeKey(null)
-    setInlinePlaybackRequested(false)
-    setPlayerReload(0)
-  }, [id, activeSeason, activeEpisode])
-
-  const failedSourceIds = useMemo(
-    () => new Set(Object.keys(sourceStates).filter((sourceId) => sourceStates[sourceId].status === 'failed')),
-    [sourceStates],
+  const playbackRequested = theaterMode || inlinePlaybackRequested
+  const resetKey = `${id}:${season}:${episode}`
+  const playableSources = useMemo(
+    () => playableSourcesFor(sources, mediaType, season, episode),
+    [sources, mediaType, season, episode],
   )
-
-  const markSourceFailed = useCallback((source: MediaSource, reason: SourceFailureReason, message?: string) => {
-    playerDebug('source failed', { sourceId: source.id, label: getSourceLabel(source), reason })
-    setSourceStates((prev) => ({
-      ...prev,
-      [source.id]: { status: 'failed', reason, message: message ?? SOURCE_FAILURE_MESSAGES[reason] },
-    }))
-  }, [])
-
-  const resetSource = (sourceId: string) => {
-    setSourceStates((prev) => withoutSource(prev, sourceId))
-  }
-
-  // Sync state if id changes
-  useEffect(() => {
-    if (mediaType !== 'tv') return
-    const start = computeStartEpisode()
-    setActiveSeason(start.seasonNumber)
-    setActiveEpisode(start.episodeNumber)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id])
-
-  // Auto-correct episode selection if next estimated episode is out of bounds
-  useEffect(() => {
-    if (mediaType !== 'tv' || loadingEpisodes || episodes.length === 0) return
-    
-    if (activeEpisode > episodes.length) {
-      const currentSeasonIndex = availableSeasons.indexOf(activeSeason)
-      if (currentSeasonIndex !== -1 && currentSeasonIndex < availableSeasons.length - 1) {
-        const nextSeason = availableSeasons[currentSeasonIndex + 1]
-        setActiveSeason(nextSeason)
-        setActiveEpisode(1)
-      } else {
-        setActiveEpisode(episodes.length)
-      }
-    }
-  }, [episodes, loadingEpisodes, activeSeason, activeEpisode, availableSeasons, mediaType])
-
-  const progressSeason = mediaType === 'tv' ? activeSeason : null
-  const progressEpisode = mediaType === 'tv' ? activeEpisode : null
-  const activeWatched = mediaType === 'tv' ? isEpisodeWatched(id, activeSeason, activeEpisode) : isMovieWatched(id)
-  const savedProgress = getProgress(mediaType, id, progressSeason, progressEpisode)
-  const resumePosition = !activeWatched
-    && savedProgress
-    && savedProgress.position > MIN_RESUME_SECONDS
-    && savedProgress.position < savedProgress.duration * MAX_RESUME_SHARE
-    ? savedProgress.position
-    : null
-
-  const lastProgressSaveRef = useRef(0)
-  // The latest position reported by the player for the current title, if any.
-  const reportedPositionRef = useRef<{ position: number; duration: number } | null>(null)
-  const lastCommitRef = useRef<{ seconds: number; position?: number }>({ seconds: 0 })
-  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const playback = useSourcePlayback({ playableSources, resetKey, playbackRequested })
+  const { activeSource, activeState, isDynamic, iframeKey, iframeLoaded } = playback
 
   useEffect(() => {
-    if (!theaterMode) return
-    returnFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onTheaterModeChange(false)
-    }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    window.addEventListener('keydown', onKeyDown)
-    exitButtonRef.current?.focus()
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', onKeyDown)
-      if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus()
-      returnFocusRef.current = null
-    }
-  }, [theaterMode, onTheaterModeChange])
+    setInlinePlaybackRequested(false)
+  }, [resetKey])
 
   const exitTheater = useCallback(() => onTheaterModeChange(false), [onTheaterModeChange])
+  useTheaterMode(theaterMode, exitTheater, exitButtonRef)
   useTheaterFullscreen(theaterMode, playerShellRef, videoRef, exitTheater)
+  useVideoDiagnostics(videoRef, `player:${mediaType}:${id}`, activeSource?.sourceUrl ?? '')
 
-  const playableSources = useMemo(() => {
-    if (mediaType === 'movie') {
-      return sources
-    }
-    const dbSources = sources.filter(
-      (source) => source.seasonNumber === activeSeason && source.episodeNumber === activeEpisode
-    )
-    const dynamicSources = sources.filter(
-      (source) => source.isDynamic
-    ).map((source) => {
-      let url = source.sourceUrl
-      if (url.includes('{season}') || url.includes('{episode}')) {
-        url = url
-          .replace(/{season}/g, String(activeSeason))
-          .replace(/{episode}/g, String(activeEpisode))
-      } else {
-        url = `${url}/season/${activeSeason}?e=${activeEpisode}`
-      }
-      return {
-        ...source,
-        seasonNumber: activeSeason,
-        episodeNumber: activeEpisode,
-        sourceUrl: url,
-      }
-    })
-    return [...dbSources, ...dynamicSources]
-  }, [sources, mediaType, activeSeason, activeEpisode])
-
-  const activeSource = useMemo(() => {
-    if (playableSources.length === 0) return undefined
-    // An explicit choice wins even when it failed, so the user sees that
-    // source's own error instead of being silently moved elsewhere.
-    if (selectedSourceId) {
-      const selected = playableSources.find((s) => s.id === selectedSourceId)
-      if (selected) return selected
-    }
-    return playableSources.find((s) => !failedSourceIds.has(s.id)) ?? playableSources[0]
-  }, [playableSources, selectedSourceId, failedSourceIds])
-  const activeSourceIsDynamic = isDynamicSource(activeSource)
-  const activeSourceState = activeSource ? sourceStates[activeSource.id] : undefined
-  const activeExtractedUrl = activeSourceState?.status === 'ready' ? activeSourceState.extractedUrl : null
-  const iframeKey = activeSource && activeExtractedUrl ? `${activeSource.id}|${activeExtractedUrl}|${playerReload}` : null
-  const iframeLoaded = iframeKey !== null && loadedIframeKey === iframeKey
-  const dynamicPlaybackRequested = theaterMode || inlinePlaybackRequested
-
-  // The watcher counts real playback time. A title enters history only after
-  // MIN_COUNTED_WATCH_SECONDS, and is finished once watch time covers
-  // WATCHED_THRESHOLD of its runtime. A player that reports its own position is
-  // trusted over watch time for resuming and finishing.
-  const activeEntry = getEntry(mediaType, id, progressSeason, progressEpisode)
-  const hasEntry = activeEntry !== null
-  const runtimeMinutes = mediaType === 'tv'
-    ? episodes.find((episode) => episode.season_number === activeSeason && episode.episode_number === activeEpisode)?.runtime
+  const runtimeMinutes = isTv
+    ? selection.episodes.find((item) => item.season_number === season && item.episode_number === episode)?.runtime
     : runtime
-  const runtimeSeconds = runtimeMinutes && runtimeMinutes > 0 ? runtimeMinutes * 60 : 0
-  const watcherActive = activeSourceIsDynamic ? dynamicPlaybackRequested && iframeLoaded : videoPlaying
-  const watchSessionKey = `${mediaType}:${id}:${progressSeason}:${progressEpisode}`
-
-  const commitWatch = useCallback((watchSeconds: number, urgent = false) => {
-    if (!hasEntry && watchSeconds < MIN_COUNTED_WATCH_SECONDS) return
-    const reported = reportedPositionRef.current
-    const last = lastCommitRef.current
-    if (Math.abs(watchSeconds - last.seconds) < 1 && reported?.position === last.position) return
-    lastCommitRef.current = { seconds: watchSeconds, position: reported?.position }
-    recordWatch({
-      item: media,
-      seasonNumber: progressSeason,
-      episodeNumber: progressEpisode,
-      watchSeconds,
-      position: reported?.position,
-      duration: reported?.duration,
-      finished: !reported && runtimeSeconds > 0 && watchSeconds >= runtimeSeconds * WATCHED_THRESHOLD,
-      urgent,
-    })
-  }, [hasEntry, media, progressEpisode, progressSeason, recordWatch, runtimeSeconds])
-
-  const readWatchSeconds = usePlaybackWatcher({
-    active: watcherActive,
-    sessionKey: watchSessionKey,
-    initialSeconds: activeEntry?.watchSeconds ?? 0,
-    onUpdate: useCallback(
-      (watchSeconds: number, reason: WatcherUpdateReason) => commitWatch(watchSeconds, reason !== 'tick'),
-      [commitWatch],
-    ),
+  const progress = useWatchProgress({
+    media,
+    seasonNumber: isTv ? season : null,
+    episodeNumber: isTv ? episode : null,
+    runtimeMinutes,
+    active: isDynamic ? playbackRequested && iframeLoaded : videoPlaying,
+    iframeRef,
   })
 
-  // Runs after the watcher has reported the previous title, so nothing leaks across.
-  useEffect(() => {
-    reportedPositionRef.current = null
-    lastCommitRef.current = { seconds: readWatchSeconds() }
-  }, [watchSessionKey, readWatchSeconds])
-
-  const saveProgress = useCallback((position: number, duration: number, mode: 'throttled' | 'now' | 'urgent' = 'throttled') => {
-    if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0) return
-    reportedPositionRef.current = { position, duration }
-    const crossedThreshold = !activeWatched && position / duration >= WATCHED_THRESHOLD
-    const now = Date.now()
-    if (mode === 'throttled' && !crossedThreshold && now - lastProgressSaveRef.current < PROGRESS_SAVE_INTERVAL_MS) return
-    lastProgressSaveRef.current = now
-    commitWatch(readWatchSeconds(), mode === 'urgent')
-  }, [activeWatched, commitWatch, readWatchSeconds])
-
-  useEmbedProgress(iframeRef, ({ position, duration }) => saveProgress(position, duration))
-
-  useEffect(() => {
-    const previousId = previousActiveSourceIdRef.current
-    previousActiveSourceIdRef.current = activeSource?.id ?? null
-    if (!activeSource || !previousId || previousId === activeSource.id) return
-    playerDebug('switching source', {
-      from: previousId,
-      to: activeSource.id,
-      label: getSourceLabel(activeSource),
-      reason: selectedSourceId === activeSource.id ? 'user' : 'auto-fallback',
-    })
-  }, [activeSource, selectedSourceId])
-
-  // A new playback session retries sources that failed in the previous one.
-  useEffect(() => {
-    if (dynamicPlaybackRequested) return
-    setLoadedIframeKey(null)
-    setSourceStates((prev) => {
-      const next = Object.fromEntries(Object.entries(prev).filter(([, state]) => state.status === 'ready'))
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next
-    })
-  }, [dynamicPlaybackRequested])
-
-
-
-  useVideoDiagnostics(
-    videoRef,
-    `player:${mediaType}:${id}`,
-    activeSource?.sourceUrl ?? '',
+  const listings = useMemo(
+    () => episodeListings(sources, selection.episodes, id, season),
+    [sources, selection.episodes, id, season],
   )
 
-  useEffect(() => {
-    if (mediaType !== 'tv') return
-    const controller = new AbortController()
-    setLoadingEpisodes(true)
-    setEpisodesError(null)
-    getTvSeasonDetails(id, activeSeason, controller.signal)
-      .then((data) => {
-        setEpisodes(data.episodes ?? [])
-        setLoadingEpisodes(false)
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return
-        setEpisodes([])
-        setEpisodesError('Episode metadata is unavailable. Authorised episodes remain playable.')
-        setLoadingEpisodes(false)
-      })
-    return () => controller.abort()
-  }, [activeSeason, id, mediaType])
+  if (!activeSource) return <EmptyPlayer />
 
-  useEffect(() => {
-    if (!dynamicPlaybackRequested || !activeSource || !activeSource.sourceUrl || !activeSourceIsDynamic) return
-    const existing = sourceStatesRef.current[activeSource.id]
-    if (existing?.status === 'ready' || existing?.status === 'failed') return
-
-    const currentSource = activeSource
-    const controller = new AbortController()
-    let timedOut = false
-    const timeout = window.setTimeout(() => {
-      timedOut = true
-      controller.abort()
-    }, EXTRACTION_TIMEOUT_MS)
-
-    playerDebug('loading source', {
-      sourceId: currentSource.id,
-      label: getSourceLabel(currentSource),
-      host: urlHost(currentSource.sourceUrl),
-    })
-    setSourceStates((prev) => ({ ...prev, [currentSource.id]: { status: 'extracting' } }))
-
-    apiRequest<{ extractedUrl: string | null; embedBlocked?: EmbedBlockReason | null }>(
-      `/api/media-sources/extract?url=${encodeURIComponent(currentSource.sourceUrl)}`,
-      { signal: controller.signal },
-    )
-      .then((data) => {
-        window.clearTimeout(timeout)
-        if (data.embedBlocked) {
-          playerDebug('provider refused embedding', {
-            sourceId: currentSource.id,
-            host: urlHost(data.extractedUrl),
-            reason: data.embedBlocked,
-          })
-          markSourceFailed(currentSource, 'embed-blocked')
-          return
-        }
-        if (!isEmbeddableUrl(data.extractedUrl, currentSource.sourceUrl)) {
-          markSourceFailed(currentSource, 'no-player')
-          return
-        }
-        const extractedUrl = data.extractedUrl
-        setSourceStates((prev) => ({ ...prev, [currentSource.id]: { status: 'ready', extractedUrl } }))
-      })
-      .catch((error: unknown) => {
-        window.clearTimeout(timeout)
-        if (controller.signal.aborted && !timedOut) return
-        if (!timedOut) console.error('Extractor failed:', error)
-        markSourceFailed(currentSource, timedOut ? 'extract-timeout' : 'extract-error')
-      })
-
-    return () => {
-      window.clearTimeout(timeout)
-      controller.abort()
-      // Drop an interrupted extraction so the source is fetched again next time.
-      setSourceStates((prev) => (
-        prev[currentSource.id]?.status === 'extracting' ? withoutSource(prev, currentSource.id) : prev
-      ))
-    }
-  }, [activeSource, activeSourceIsDynamic, dynamicPlaybackRequested, extractionAttempt, markSourceFailed])
-
-  useEffect(() => {
-    if (!dynamicPlaybackRequested || !iframeKey) return
-    logIframeConfiguration('streaming-player')
-  }, [dynamicPlaybackRequested, iframeKey])
-
-  useEffect(() => () => {
-    if (iframeRevealTimerRef.current !== null) window.clearTimeout(iframeRevealTimerRef.current)
-  }, [])
-
-  useEffect(() => {
-    if (!dynamicPlaybackRequested || !iframeKey || iframeLoaded || !activeSource) return
-    const currentSource = activeSource
-    const timeout = window.setTimeout(() => markSourceFailed(currentSource, 'load-timeout'), IFRAME_LOAD_TIMEOUT_MS)
-    return () => window.clearTimeout(timeout)
-  }, [dynamicPlaybackRequested, iframeKey, iframeLoaded, activeSource, markSourceFailed])
-
-  const catalogEpisodes = useMemo(() => {
-    const byEpisode = new Map(episodes.map((episode) => [episode.episode_number, episode]))
-    const hasDynamic = sources.some((source) => source.isDynamic)
-
-    if (hasDynamic) {
-      return episodes.map((episode) => {
-        const dbSource = sources.find(
-          (source) => source.seasonNumber === activeSeason && source.episodeNumber === episode.episode_number
-        )
-        const source = dbSource || {
-          id: `dynamic-${activeSeason}-${episode.episode_number}`,
-          mediaType: 'tv' as MediaType,
-          tmdbId: id,
-          seasonNumber: activeSeason,
-          episodeNumber: episode.episode_number,
-          label: `Episode ${episode.episode_number}`,
-          sourceUrl: '',
-          mimeType: 'video/mp4' as const,
-          rightsBasis: 'licensed' as const
-        }
-        return { source, episode: byEpisode.get(episode.episode_number) }
-      })
-    }
-
-    return sources
-      .filter((source) => source.seasonNumber === activeSeason && source.episodeNumber !== null)
-      .sort((a, b) => (a.episodeNumber ?? 0) - (b.episodeNumber ?? 0))
-      .map((source) => ({ source, episode: byEpisode.get(source.episodeNumber!) }))
-  }, [activeSeason, episodes, sources, id])
-
-  // Freeze the start offset per player load; saving progress must not reload the iframe.
-  if (iframeKey && activeExtractedUrl && iframeStart?.key !== iframeKey) {
-    setIframeStart({ key: iframeKey, src: withStartTime(activeExtractedUrl, resumePosition) })
-  }
-  const iframeSrc = iframeStart?.key === iframeKey && iframeStart ? iframeStart.src : activeExtractedUrl
-
-  if (!activeSource) {
-    return (
-      <section id="streaming-player" aria-labelledby="empty-player-heading" className="scroll-mt-20">
-        <div className="mb-4 px-1">
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Video player</p>
-          <h2 id="empty-player-heading" className="mt-1 text-lg font-black text-white">Authorised playback</h2>
-        </div>
-        <div className="relative grid place-items-center overflow-hidden rounded-2xl bg-black py-8 shadow-2xl ring-1 ring-white/10 sm:aspect-video sm:py-0">
-          <div className="max-w-lg px-6 text-center">
-            <span className="mx-auto grid size-14 place-items-center rounded-full border border-amber-300/20 bg-amber-300/10 text-amber-200">
-              <Info aria-hidden="true" />
-            </span>
-            <h3 className="mt-4 text-lg font-semibold text-white">No authorised source is available</h3>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">An administrator can add an owned or licensed MP4 or WebM source for this title.</p>
-          </div>
-        </div>
-        <p className="mt-4 rounded-2xl border border-white/7 bg-white/[0.025] p-4 text-xs leading-5 text-zinc-500">
-          The player remains visible so playback availability is clear. It will never load an unapproved third-party stream automatically.
-        </p>
-      </section>
-    )
-  }
-
+  const sourceLabel = getSourceLabel(activeSource)
   const currentMediaError = mediaError?.sourceId === activeSource.id
     ? mediaError.message
-    : !activeSourceIsDynamic && activeSourceState?.status === 'failed'
-      ? activeSourceState.message
+    : !isDynamic && activeState?.status === 'failed'
+      ? activeState.message
       : null
-  const fallbackSource = playableSources.find((s) => s.id !== activeSource.id && !failedSourceIds.has(s.id))
+  const showsIframe = isDynamic && playbackRequested && Boolean(playback.extractedUrl && iframeKey)
   // Only real media keeps a fixed 16:9 box on phones; the idle, preparing and
   // failed panels are taller than a phone-width 16:9 box and would be clipped.
-  const showsIframe = activeSourceIsDynamic && dynamicPlaybackRequested && Boolean(activeExtractedUrl && iframeKey)
-  const showsMedia = !activeSourceIsDynamic || showsIframe
-  const safeDuration = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : 0
+  const showsMedia = !isDynamic || showsIframe
 
-  const toggleVideoPlayback = () => {
-    const video = videoRef.current
-    if (!video) return
-    if (video.paused) {
-      void video.play().catch(() => {
-        setMediaError({
-          sourceId: activeSource.id,
-          message: 'The video could not start. Check the source format and host response.',
-        })
-      })
-      return
-    }
-    video.pause()
-  }
+  let stage: DynamicStage
+  if (!playbackRequested) stage = { kind: 'idle' }
+  else if (playback.extractedUrl && iframeKey) stage = { kind: 'frame', iframeKey, url: playback.extractedUrl, loaded: iframeLoaded }
+  else if (activeState?.status === 'failed') stage = { kind: 'failed', message: activeState.message }
+  else stage = { kind: 'preparing' }
 
-  const seekVideo = (time: number) => {
-    const video = videoRef.current
-    if (!video || !Number.isFinite(time)) return
-    video.currentTime = time
-    setVideoCurrentTime(time)
-  }
-
-  const setVideoMutedState = (muted: boolean) => {
-    const video = videoRef.current
-    if (!video) return
-    video.muted = muted
-    setVideoMuted(muted)
-  }
-
-  const setVideoVolumeState = (volume: number) => {
-    const video = videoRef.current
-    if (!video) return
-    video.volume = volume
-    video.muted = volume === 0
-    setVideoVolume(volume)
-    setVideoMuted(volume === 0)
-  }
+  const stopPlayback = () => setInlinePlaybackRequested(false)
 
   // The provider's own buffering spinner lives inside its cross-origin frame,
   // where we can't clear it; reloading the frame at the last saved position is
-  // the way out when it sticks.
+  // the way out when it sticks. Save first so it resumes from the latest point.
   const reloadPlayer = () => {
-    // Save first so the reloaded frame resumes from the latest position.
-    commitWatch(readWatchSeconds(), true)
-    setPlayerReload((count) => count + 1)
-  }
-
-  const revealIframe = (loadedKey: string) => {
-    if (iframeRevealTimerRef.current !== null) window.clearTimeout(iframeRevealTimerRef.current)
-    iframeRevealTimerRef.current = window.setTimeout(() => {
-      setLoadedIframeKey(loadedKey)
-      iframeRevealTimerRef.current = null
-    }, IFRAME_REVEAL_DELAY_MS)
+    progress.flush()
+    playback.reloadPlayer()
   }
 
   return (
     <section id="streaming-player" className="scroll-mt-20" aria-labelledby="player-heading">
-      <div className={`grid grid-cols-1 gap-6 ${theaterMode || mediaType === 'movie' ? '' : 'lg:grid-cols-[minmax(0,1fr)_320px]'}`}>
+      <div className={`grid grid-cols-1 gap-6 ${theaterMode || !isTv ? '' : 'lg:grid-cols-[minmax(0,1fr)_320px]'}`}>
         <div className="min-w-0">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1">
-            <div className="min-w-0">
-              <h2 id="player-heading" className="mt-1 line-clamp-1 text-lg font-black text-white">
-                {title}{mediaType === 'tv' ? ` — S${activeSeason} E${activeEpisode}` : ''}
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              {showsIframe && !theaterMode && (
-                <button
-                  type="button"
-                  onClick={reloadPlayer}
-                  className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
-                  aria-label="Reload player"
-                  title="Stuck loading? Reload player"
-                >
-                  <RotateCw size={17} aria-hidden="true" />
-                </button>
-              )}
-              {activeSourceIsDynamic && inlinePlaybackRequested && !theaterMode && (
-                <button
-                  type="button"
-                  onClick={() => setInlinePlaybackRequested(false)}
-                  className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
-                  aria-label="Stop player"
-                  title="Stop player"
-                >
-                  <X size={17} aria-hidden="true" />
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => onTheaterModeChange(true)}
-                className="grid size-10 place-items-center rounded-full bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:size-11"
-                aria-label="Theater mode"
-                title="Theater mode"
-              >
-                <Maximize2 size={17} aria-hidden="true" />
-              </button>
-            </div>
-          </div>
+          <PlayerToolbar
+            heading={`${title}${isTv ? ` — S${season} E${episode}` : ''}`}
+            onReload={showsIframe && !theaterMode ? reloadPlayer : undefined}
+            onStop={isDynamic && inlinePlaybackRequested && !theaterMode ? stopPlayback : undefined}
+            onTheater={() => onTheaterModeChange(true)}
+          />
 
           {playableSources.length > 1 && (
-            <div className="mb-4 flex flex-wrap items-center gap-2 px-1">
-              <span className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 mr-1">Source Server:</span>
-              {playableSources.map((source) => (
-                <button
-                  key={source.id}
-                  type="button"
-                  onClick={() => {
-                    setInlinePlaybackRequested(false)
-                    setSelectedSourceId(source.id)
-                    if (failedSourceIds.has(source.id)) resetSource(source.id)
-                  }}
-                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold transition duration-200 active:scale-95 pointer-coarse:min-h-11 ${
-                    activeSource?.id === source.id
-                      ? 'bg-brand-400 border border-brand-400 text-ink-950 shadow-md shadow-brand-400/10 active-bg-emerald-500'
-                      : 'bg-white/5 border border-white/5 text-zinc-400 hover:bg-white/10 hover:border-white/10 hover:text-zinc-200'
-                  }`}
-                >
-                  {getSourceLabel(source)}
-                </button>
-              ))}
-            </div>
+            <SourceSwitcher
+              sources={playableSources}
+              activeSourceId={activeSource.id}
+              onSelect={(sourceId) => {
+                stopPlayback()
+                playback.selectSource(sourceId)
+              }}
+            />
           )}
 
           {/* Promoted to full-viewport with CSS rather than reparented — moving the
@@ -716,8 +160,8 @@ export function StreamingPlayer({
               <button
                 ref={exitButtonRef}
                 type="button"
-                onClick={() => onTheaterModeChange(false)}
-                className="absolute right-4 top-4 z-20 grid size-11 place-items-center rounded-full bg-black/70 text-zinc-200 ring-1 ring-white/15 backdrop-blur transition hover:bg-black/90 hover:text-white"
+                onClick={exitTheater}
+                className={`${THEATER_BUTTON} right-4`}
                 aria-label="Exit theater mode"
               >
                 <Minimize2 size={18} aria-hidden="true" />
@@ -727,211 +171,51 @@ export function StreamingPlayer({
               <button
                 type="button"
                 onClick={reloadPlayer}
-                className="absolute right-[4.25rem] top-4 z-20 grid size-11 place-items-center rounded-full bg-black/70 text-zinc-200 ring-1 ring-white/15 backdrop-blur transition hover:bg-black/90 hover:text-white"
+                className={`${THEATER_BUTTON} right-[4.25rem]`}
                 aria-label="Reload player"
                 title="Stuck loading? Reload player"
               >
                 <RotateCw size={18} aria-hidden="true" />
               </button>
             )}
-            {activeSourceIsDynamic ? (
-              !dynamicPlaybackRequested ? (
-                <div className="grid size-full place-items-center bg-black px-5 py-8 text-center sm:px-6">
-                  <div className="max-w-md">
-                    <span className="mx-auto grid size-12 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300 sm:size-14">
-                      <Play size={20} fill="currentColor" aria-hidden="true" />
-                    </span>
-                    <h3 className="mt-3 text-base font-semibold text-white sm:mt-4">Ready when you are</h3>
-                    <p className="mt-1.5 text-xs leading-5 text-zinc-400 sm:mt-2 sm:text-sm sm:leading-6">
-                      Start playback here, or use Theater mode for a larger view.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setInlinePlaybackRequested(true)}
-                      className="mt-4 min-h-11 rounded-xl bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200 sm:mt-5"
-                    >
-                      Play {mediaType === 'movie' ? 'movie' : 'episode'}
-                    </button>
-                  </div>
-                </div>
-              ) : activeExtractedUrl && iframeKey ? (
-                <div className="relative size-full bg-black">
-                  {/* No sandbox: providers refuse to run in sandboxed frames. See utils/playerDebug.ts. */}
-                  <iframe
-                    ref={iframeRef}
-                    key={iframeKey}
-                    src={iframeSrc ?? activeExtractedUrl}
-                    className={`block size-full border-0 bg-black object-contain transition-opacity duration-200 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
-                    allow={PLAYER_IFRAME_ALLOW}
-                    allowFullScreen
-                    referrerPolicy={PLAYER_IFRAME_REFERRER_POLICY}
-                    aria-label={`Video player for ${title}`}
-                    onLoad={() => revealIframe(iframeKey)}
-                  />
-                  {!iframeLoaded && (
-                    <div role="status" className="absolute inset-0 z-10 grid place-items-center bg-black px-6 text-center">
-                      <div>
-                        <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
-                        <p className="mt-4 text-sm font-semibold text-zinc-300">
-                          Loading player ({getSourceLabel(activeSource)})…
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : activeSourceState?.status === 'failed' ? (
-                <div className="grid size-full place-items-center bg-black px-5 py-8 text-center sm:px-6">
-                  <div role="alert" className="w-full max-w-md">
-                    <span className="mx-auto grid size-12 place-items-center rounded-full border border-red-400/20 bg-red-400/10 text-red-200 sm:size-14">
-                      <AlertCircle aria-hidden="true" />
-                    </span>
-                    <h3 className="mt-3 text-base font-semibold text-white sm:mt-4 sm:text-lg">Player unavailable</h3>
-                    {playableSources.length > 1 && (
-                      <p className="mt-1 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{getSourceLabel(activeSource)}</p>
-                    )}
-                    <p className="mt-1.5 text-xs leading-5 text-zinc-400 sm:mt-2 sm:text-sm sm:leading-6">{activeSourceState.message}</p>
-                    <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          resetSource(activeSource.id)
-                          setMediaError(null)
-                          setExtractionAttempt((attempt) => attempt + 1)
-                        }}
-                        className="min-h-11 w-full rounded-xl sm:w-auto bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200"
-                      >
-                        Retry player
-                      </button>
-                      {fallbackSource && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedSourceId(fallbackSource.id)}
-                          className="min-h-11 w-full rounded-xl sm:w-auto border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
-                        >
-                          Try {getSourceLabel(fallbackSource)}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setInlinePlaybackRequested(false)
-                          onTheaterModeChange(false)
-                        }}
-                        className="min-h-11 w-full rounded-xl sm:w-auto border border-white/15 bg-white/5 px-5 text-sm font-black text-white transition hover:bg-white/10"
-                      >
-                        Stop player
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div role="status" className="grid size-full place-items-center bg-black px-5 py-8 text-center sm:px-6">
-                  <div>
-                    <div className="mx-auto size-8 animate-spin rounded-full border border-white/10 border-t-white" />
-                    <p className="mt-4 text-sm font-semibold text-zinc-300">
-                      Preparing player ({getSourceLabel(activeSource)})…
-                    </p>
-                  </div>
-                </div>
-              )
+            {isDynamic ? (
+              <DynamicPlayerStage
+                stage={stage}
+                iframeRef={iframeRef}
+                title={title}
+                itemKind={isTv ? 'episode' : 'movie'}
+                sourceLabel={sourceLabel}
+                showSourceLabel={playableSources.length > 1}
+                fallbackLabel={playback.fallbackSource ? getSourceLabel(playback.fallbackSource) : null}
+                withStartTime={(url) => withStartTime(url, progress.resumePosition)}
+                onPlay={() => setInlinePlaybackRequested(true)}
+                onFrameLoad={playback.revealIframe}
+                onRetry={() => {
+                  setMediaError(null)
+                  playback.retryActiveSource()
+                }}
+                onFallback={() => {
+                  if (playback.fallbackSource) playback.selectSource(playback.fallbackSource.id)
+                }}
+                onStop={() => {
+                  stopPlayback()
+                  exitTheater()
+                }}
+              />
             ) : (
-              <>
-                <video
-                  ref={videoRef}
-                  src={activeSource.sourceUrl}
-                  playsInline
-                  preload="metadata"
-                  className="block size-full bg-black object-contain"
-                  aria-label={`Video player for ${title}`}
-                  onDoubleClick={(event) => event.preventDefault()}
-                  onLoadedMetadata={(event) => {
-                    const video = event.currentTarget
-                    setMediaError(null)
-                    setVideoDuration(video.duration)
-                    setVideoCurrentTime(video.currentTime)
-                    setVideoVolume(video.volume)
-                    setVideoMuted(video.muted)
-                    if (resumePosition !== null && resumePosition < video.duration * MAX_RESUME_SHARE) {
-                      video.currentTime = resumePosition
-                      setVideoCurrentTime(resumePosition)
-                    }
-                  }}
-                  onDurationChange={(event) => setVideoDuration(event.currentTarget.duration)}
-                  onTimeUpdate={(event) => {
-                    const video = event.currentTarget
-                    setVideoCurrentTime(video.currentTime)
-                    if (!video.paused) saveProgress(video.currentTime, video.duration)
-                  }}
-                  onPlay={() => setVideoPlaying(true)}
-                  onPause={(event) => {
-                    setVideoPlaying(false)
-                    const video = event.currentTarget
-                    if (!video.ended) saveProgress(video.currentTime, video.duration, 'urgent')
-                  }}
-                  onSeeked={(event) => {
-                    const video = event.currentTarget
-                    if (video.currentTime > 0) saveProgress(video.currentTime, video.duration, 'now')
-                  }}
-                  onEnded={(event) => {
-                    const video = event.currentTarget
-                    saveProgress(video.duration, video.duration, 'urgent')
-                  }}
-                  onVolumeChange={(event) => {
-                    setVideoMuted(event.currentTarget.muted)
-                    setVideoVolume(event.currentTarget.volume)
-                  }}
-                  onError={(event) => {
-                    const video = event.currentTarget
-                    markSourceFailed(activeSource, 'media-error', video.error?.message || undefined)
-                  }}
-                />
-                <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/95 via-black/70 to-transparent px-3 pb-3 pt-12 sm:px-4 sm:pb-4">
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-200">
-                    <button
-                      type="button"
-                      onClick={toggleVideoPlayback}
-                      className="grid size-10 shrink-0 place-items-center rounded-full bg-white text-black transition hover:bg-zinc-200 pointer-coarse:size-11"
-                      aria-label={videoPlaying ? 'Pause video' : 'Play video'}
-                    >
-                      {videoPlaying ? <Pause size={17} fill="currentColor" aria-hidden="true" /> : <Play size={17} fill="currentColor" aria-hidden="true" />}
-                    </button>
-                    <span className="shrink-0 tabular-nums" aria-live="off">{formatPlaybackTime(videoCurrentTime)} / {formatPlaybackTime(safeDuration)}</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max={safeDuration || 0}
-                      step="0.1"
-                      value={Math.min(videoCurrentTime, safeDuration || 0)}
-                      onChange={(event) => seekVideo(Number(event.target.value))}
-                      disabled={safeDuration === 0}
-                      className="order-first basis-full accent-white disabled:opacity-40 sm:order-none sm:min-w-20 sm:flex-1 sm:basis-auto"
-                      aria-label="Seek video"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setVideoMutedState(!videoMuted)}
-                      className="ml-auto grid size-10 shrink-0 place-items-center rounded-full text-zinc-100 transition hover:bg-white/10 pointer-coarse:size-11 sm:ml-0"
-                      aria-label={videoMuted ? 'Unmute video' : 'Mute video'}
-                    >
-                      {videoMuted ? <VolumeX size={18} aria-hidden="true" /> : <Volume2 size={18} aria-hidden="true" />}
-                    </button>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={videoMuted ? 0 : videoVolume}
-                      onChange={(event) => setVideoVolumeState(Number(event.target.value))}
-                      className="w-20 accent-white pointer-coarse:hidden sm:w-24"
-                      aria-label="Video volume"
-                    />
-                  </div>
-                </div>
-              </>
+              <NativeVideoPlayer
+                videoRef={videoRef}
+                src={activeSource.sourceUrl}
+                title={title}
+                playing={videoPlaying}
+                resumePosition={progress.resumePosition}
+                onPlayingChange={setVideoPlaying}
+                onProgress={progress.saveProgress}
+                onPlaybackError={(message) => setMediaError(message ? { sourceId: activeSource.id, message } : null)}
+                onMediaError={(message) => playback.markSourceFailed(activeSource, 'media-error', message)}
+              />
             )}
           </div>
-
-
 
           {currentMediaError && (
             <p role="alert" className="mt-3 flex items-start gap-2 rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm text-red-200">
@@ -941,124 +225,20 @@ export function StreamingPlayer({
           )}
         </div>
 
-        {mediaType === 'tv' && !theaterMode && (
-          <aside className="flex flex-col rounded-3xl border border-white/7 bg-white/[0.025] p-4" aria-labelledby="episodes-heading">
-            <div className="mb-3 flex items-center justify-between gap-3 border-b border-white/7 pb-3">
-              <div className="min-w-0">
-                <h3 id="episodes-heading" className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-white">
-                  <Play size={12} className="fill-current" aria-hidden="true" />Authorised episodes
-                </h3>
-                <div className="mt-1 flex flex-col gap-1">
-                  <p className="text-[10px] text-zinc-500">{numberOfSeasons ?? availableSeasons.length} catalog season(s)</p>
-                  <p className="text-[10px] text-brand-400 font-bold">
-                    {catalogEpisodes.filter(({ source }) => isEpisodeWatched(id, activeSeason, source.episodeNumber!)).length} / {catalogEpisodes.length} watched
-                  </p>
-                  {catalogEpisodes.length > 0 && (
-                    <div className="h-1 w-24 rounded-full bg-white/10 overflow-hidden">
-                      <div
-                        className="h-full bg-brand-400 transition-all duration-300"
-                        style={{
-                          width: `${
-                            (catalogEpisodes.filter(({ source }) => isEpisodeWatched(id, activeSeason, source.episodeNumber!)).length /
-                              catalogEpisodes.length) *
-                            100
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setSeasonDropdownOpen((current) => !current)}
-                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-black text-white hover:bg-white/10"
-                >
-                  Season {activeSeason}<ChevronDown size={14} aria-hidden="true" />
-                </button>
-                {seasonDropdownOpen && (
-                  <div className="absolute right-0 z-30 mt-1.5 max-h-48 w-32 overflow-y-auto rounded-2xl border border-white/7 bg-zinc-950 py-1 shadow-2xl">
-                    {availableSeasons.map((seasonNumber) => (
-                      <button
-                        key={seasonNumber}
-                        type="button"
-                        onClick={() => {
-                          const firstSource = sources.find((source) => source.seasonNumber === seasonNumber)
-                          setActiveSeason(seasonNumber)
-                          setActiveEpisode(firstSource?.episodeNumber ?? 1)
-                          setSeasonDropdownOpen(false)
-                        }}
-                        className={`w-full px-3 py-2.5 text-left text-xs font-bold hover:bg-white/5 ${activeSeason === seasonNumber ? 'bg-white/5 text-white' : 'text-zinc-400'}`}
-                      >
-                        Season {seasonNumber}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div data-lenis-prevent className="max-h-[500px] flex-1 space-y-2 overflow-y-auto pr-1 scrollbar-subtle">
-              {loadingEpisodes && <p role="status" className="py-6 text-center text-xs text-zinc-500">Loading episode details…</p>}
-              {episodesError && <p className="rounded-xl bg-amber-300/5 px-3 py-2 text-xs text-amber-100">{episodesError}</p>}
-              {catalogEpisodes.map(({ source, episode }) => {
-                const selected = source.id === activeSource.id
-                const stillUrl = imageUrl(episode?.still_path, 'w185')
-                const watched = isEpisodeWatched(id, activeSeason, source.episodeNumber!)
-                return (
-                  <div
-                    key={source.id}
-                    className={`flex w-full items-start gap-1 rounded-2xl border p-2 text-left transition ${
-                      selected
-                        ? 'border-white/20 bg-white/10 text-white'
-                        : 'border-white/5 bg-white/[0.02] text-zinc-400 hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setActiveEpisode(source.episodeNumber!)}
-                      aria-pressed={selected}
-                      className="flex flex-1 items-start gap-3 min-w-0 text-left outline-none"
-                    >
-                      <span className="relative aspect-video w-24 shrink-0 overflow-hidden rounded-xl bg-zinc-900">
-                        {stillUrl ? (
-                          <img src={stillUrl} alt="" className="size-full object-cover" loading="lazy" />
-                        ) : (
-                          <span className="grid size-full place-items-center">
-                            <Play size={14} aria-hidden="true" />
-                          </span>
-                        )}
-                        <span className="absolute bottom-1 right-1 rounded bg-black/85 px-1.5 py-0.5 text-[8px] font-black text-zinc-200">
-                          EP {source.episodeNumber}
-                        </span>
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="line-clamp-1 block text-xs font-black">
-                          {episode?.name || source.label}
-                        </span>
-                        <span className="mt-1 line-clamp-2 block text-[9px] leading-relaxed text-zinc-500">
-                          {episode?.overview || 'Authorised episode available.'}
-                        </span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleEpisodeWatched(id, activeSeason, source.episodeNumber!)}
-                      className={`shrink-0 rounded-full p-2.5 transition active:scale-95 ${
-                        watched
-                          ? 'text-brand-400 hover:bg-brand-500/10'
-                          : 'text-zinc-600 hover:text-zinc-400 hover:bg-white/5'
-                      }`}
-                      title={watched ? 'Mark as unwatched' : 'Mark as watched'}
-                    >
-                      <Check size={14} className={watched ? 'stroke-[3px]' : 'stroke-[2px]'} />
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          </aside>
+        {isTv && !theaterMode && (
+          <EpisodeSidebar
+            seasonCount={numberOfSeasons ?? selection.availableSeasons.length}
+            seasons={selection.availableSeasons}
+            activeSeason={season}
+            listings={listings}
+            activeSourceId={activeSource.id}
+            loading={selection.loadingEpisodes}
+            error={selection.episodesError}
+            isWatched={(episodeNumber) => isEpisodeWatched(id, season, episodeNumber)}
+            onSelectSeason={selection.selectSeason}
+            onSelectEpisode={selection.selectEpisode}
+            onToggleWatched={(episodeNumber) => toggleEpisodeWatched(id, season, episodeNumber)}
+          />
         )}
       </div>
     </section>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { browseFor } from './api'
+import { getPopular } from './api'
 import { ErrorMessage } from '../../components/ui/ErrorMessage'
 import { GridSkeleton } from '../../components/ui/LoadingSkeleton'
 import { MediaCard } from './MediaCard'
@@ -20,7 +20,7 @@ export function BrowsePage({ mediaType }: { mediaType: MediaType }) {
       else setLoading(true)
       setError(null)
       try {
-        const response = await browseFor(mediaType, nextPage, signal)
+        const response = await getPopular(mediaType, nextPage, signal)
         const normalized = normalizeMediaList(response.results, mediaType)
         setItems((current) => {
           const combined = append ? [...current, ...normalized] : normalized

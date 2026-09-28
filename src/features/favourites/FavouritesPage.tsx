@@ -1,7 +1,7 @@
 import { Heart } from 'lucide-react'
 import { Link } from 'react-router'
 import { MediaCard } from '../catalog/MediaCard'
-import { useFavourites } from './FavouritesProvider'
+import { useFavourites } from './favourites-context'
 
 export function FavouritesPage() {
   const { favourites, loading, error } = useFavourites()

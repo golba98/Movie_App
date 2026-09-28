@@ -1,9 +1,10 @@
 import { Heart, Star, X } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
-import { useFavourites } from '../favourites/FavouritesProvider'
-import { useWatchedHistory } from '../watch-history/WatchHistoryProvider'
+import { useFavourites } from '../favourites/favourites-context'
+import { useWatchedHistory } from '../watch-history/watch-history-context'
 import type { MediaItem } from '../../types/tmdb'
-import { formatRating, mediaPath } from './media'
+import { formatRating } from '../../lib/format'
+import { mediaPath } from './media'
 import { PosterImage } from './PosterImage'
 
 export type MediaCardVariant = 'default' | 'continue'

@@ -1,5 +1,5 @@
 import { CloudUpload, X } from 'lucide-react'
-import { useFavourites } from './FavouritesProvider'
+import { useFavourites } from './favourites-context'
 
 export function LegacyImportBanner() {
   const { legacyCount, importing, importLegacy, dismissLegacy } = useFavourites()

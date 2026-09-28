@@ -2,7 +2,8 @@ import { Info, Play, Star } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
 import type { MediaItem, Video } from '../../types/tmdb'
 import { backdropSrcSet, backdropUrl } from '../../lib/images'
-import { formatRating, mediaPath } from './media'
+import { formatRating } from '../../lib/format'
+import { mediaPath } from './media'
 
 export function Hero({
   item,

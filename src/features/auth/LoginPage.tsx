@@ -2,7 +2,7 @@ import { type FormEvent, useState } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router'
 import { ApiClientError } from '../../lib/api-client'
 import { AuthError, AuthField, AuthFieldGroup, AuthLayout, AuthSubmitButton } from './AuthLayout'
-import { useAuth } from './AuthProvider'
+import { useAuth } from './auth-context'
 
 function safeNext(value: string | null) {
   return value?.startsWith('/') && !value.startsWith('//') ? value : '/'
