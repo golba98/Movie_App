@@ -4,7 +4,7 @@
 
 Watch Party is still under development and is gated out of production:
 
-- **Frontend** — `watchPartyEnabled` in `src/utils/featureFlags.ts`: on in dev (`npm run dev`), off in production builds unless `VITE_ENABLE_WATCH_PARTY=true` is set at build time. Use `npm run build:watch-party && npm run preview` to test a production build (e.g. the extension flow on :4173). When off, the `/watch-party/*` routes and the "Watch with friends" button are not rendered.
+- **Frontend** — `watchPartyEnabled` in `src/lib/feature-flags.ts`: on in dev (`npm run dev`), off in production builds unless `VITE_ENABLE_WATCH_PARTY=true` is set at build time. Use `npm run build:watch-party && npm run preview` to test a production build (e.g. the extension flow on :4173). When off, the `/watch-party/*` routes and the "Watch with friends" button are not rendered.
 - **Worker** — every `/api/watch-party/*` route returns 404 unless the `WATCH_PARTY_ENABLED` env value equals `"true"`. Locally it comes from `.dev.vars` (set to `"true"` for dev and `vite preview`). In production the secret is intentionally never set, so deploys ship with the API disabled. To enable in production later: `wrangler secret put WATCH_PARTY_ENABLED` with value `true` (and set `WATCH_PARTY_SIGNING_SECRET`, which token signing needs). Note: `wrangler.jsonc` deliberately has no `secrets.required` block — declaring one makes deploys hard-fail until every listed secret exists on the worker, and it replaces `.dev.vars` inference locally.
 - The `WatchPartyRoom` Durable Object binding stays deployed (removing it would require a destructive migration); with the routes disabled it is never instantiated.
 

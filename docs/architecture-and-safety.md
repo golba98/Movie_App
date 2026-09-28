@@ -49,14 +49,14 @@ The Worker is not a video relay. This is important for both reliability and cost
 
 ## Identity, sessions, and administration
 
-Authentication is enforced in the Worker rather than hidden only in the client. Viewer passwords use PBKDF2-HMAC-SHA-256 with a unique 16-byte salt and 600,000 iterations. Raw passwords are never retained.
+Authentication is enforced in the Worker rather than hidden only in the client. Viewer passwords use PBKDF2-HMAC-SHA-256 with a unique 16-byte salt and 100,000 iterations (the most Cloudflare Workers' Web Crypto accepts). Raw passwords are never retained.
 
 After successful sign-in, the Worker creates a random session token. The browser receives it in an `HttpOnly`, `SameSite=Strict` cookie, while D1 stores only a SHA-256 hash of that token. Viewer sessions last 30 days and administrator sessions last 8 hours. A viewer must change a temporary password before normal application access is granted. Disabling an account or resetting a password revokes its active sessions.
 
 ```mermaid
 flowchart TD
   SignIn[Sign-in request] --> Limit[Rate-limit check\n5 failures in 15 minutes]
-  Limit --> Verify[PBKDF2 password verification\nunique salt and 600,000 iterations]
+  Limit --> Verify[PBKDF2 password verification\nunique salt and 100,000 iterations]
   Verify --> Session[Random session token\nHttpOnly + SameSite=Strict cookie]
   Verify --> D1[(D1: password hash)]
   Session --> TokenHash[(D1: token hash)]
