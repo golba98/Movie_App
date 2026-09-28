@@ -38,7 +38,10 @@ export function withoutSource(states: SourceStates, sourceId: string) {
 }
 
 export function getSourceLabel(source: Pick<MediaSource, 'label'>) {
-  return source.label.replace(' Stream (Dynamic)', '')
+  const label = source.label.replace(' Stream (Dynamic)', '')
+  if (label === 'Flixbaba') return 'Source 1'
+  if (label === 'Soap2Day') return 'Source 2'
+  return label
 }
 
 export function isDynamicSource(source: MediaSource | undefined) {
