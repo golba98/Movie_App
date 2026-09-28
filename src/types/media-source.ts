@@ -1,4 +1,5 @@
 import type { MediaType } from './tmdb'
+import type { PlaybackKind } from './watch-party'
 
 export type MediaMimeType = 'video/mp4' | 'video/webm'
 export type RightsBasis = 'owned' | 'licensed'
@@ -22,6 +23,12 @@ export interface MediaSource {
 // to be framed by this app (see worker/catalog/embed-policy.ts).
 export type EmbedBlockReason = 'x-frame-options' | 'frame-ancestors'
 
+export interface ExtractedPlayer {
+  extractedUrl: string | null
+  embedBlocked?: EmbedBlockReason | null
+  playbackKind?: PlaybackKind | null
+}
+
 export interface AdminMediaSource extends MediaSource {
   rightsNote: string
   active: boolean
@@ -42,12 +49,15 @@ export interface MediaSourceInput {
   active: boolean
 }
 
+/** A website the Worker builds dynamic sources from, as the admin API returns it. */
 export interface SearchProvider {
   id: string
   label: string
   baseUrl: string
   movieUrlPattern: string
   tvUrlPattern: string
+  movieEmbedPattern: string
+  tvEmbedPattern: string
   active: boolean
   createdAt: number
   updatedAt: number
@@ -58,5 +68,8 @@ export interface SearchProviderInput {
   baseUrl: string
   movieUrlPattern: string
   tvUrlPattern: string
+  // Direct embed URLs for providers whose pages can't be scraped; empty to scrape.
+  movieEmbedPattern: string
+  tvEmbedPattern: string
   active: boolean
 }

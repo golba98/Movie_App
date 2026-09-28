@@ -7,10 +7,11 @@
     "strict": true,
     "noEmit": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "types": ["chrome", "vite/client", "vitest/globals"],
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src", "test", "vite.config.ts", "vitest.config.ts", "manifest.config.ts", "manifest.test.config.ts", "playwright.config.ts"]
+  "include": ["src", "test", "trusted-origins.json", "vite.config.ts", "vitest.config.ts", "manifest.config.ts", "manifest.test.config.ts", "playwright.config.ts"]
 }

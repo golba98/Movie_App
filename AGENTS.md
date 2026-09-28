@@ -7,7 +7,7 @@ Fedora Movies is a React 19, TypeScript, and Vite single-page application with a
 ## Build, Test, and Development Commands
 
 - `npm install` installs the locked dependencies.
-- `npm run dev` starts Vite's development server.
+- `npm run dev` starts Vite's development server on localhost; `npm run dev:lan` exposes it to your network.
 - `npm run typecheck` runs strict TypeScript checks without emitting files.
 - `npm run lint` checks all TypeScript and TSX with ESLint.
 - `npm test` runs the Playwright Chromium suite; first run `npx playwright install chromium`.

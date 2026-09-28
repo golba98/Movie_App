@@ -5,13 +5,17 @@ const TESTER_PASSWORD = 'tester-password-123'
 
 let seeded = false
 
+const isLocalRequest = (request: Request) => {
+  const { hostname } = new URL(request.url)
+  return hostname === '127.0.0.1' || hostname === 'localhost'
+}
+
 /**
- * Creates a `tester` account the first time the Worker handles a request.
- * NOTE: this runs outside unit tests in every environment, production included;
- * see the follow-up in the cleanup report before relying on it.
+ * Local development only: creates a `tester` account the first time the Worker
+ * serves a request on localhost. Deployed Workers never create it.
  */
-export async function ensureTesterAccount(db: D1Database) {
-  if (seeded) return
+export async function ensureTesterAccount(request: Request, db: D1Database) {
+  if (seeded || !isLocalRequest(request)) return
   seeded = true
   try {
     const existing = await db

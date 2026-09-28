@@ -146,13 +146,6 @@ describe('watch party API', () => {
 
     await env.DB.prepare('UPDATE watch_rooms SET expires_at = ? WHERE id = ?').bind(Date.now() - 1, roomId).run()
     expect((await request(`/api/watch-party/rooms/${roomId}`)).status).toBe(404)
-
-    const dynamic = await createMediaSource(admin, {
-      tmdbId: 93,
-      sourceUrl: 'https://flixbaba.example.test/movie/93',
-    })
-    const dynamicSource = ((await dynamic.json()) as { data: { source: { id: string } } }).data.source
-    expect((await createRoom(viewer, dynamicSource.id)).status).toBe(400)
   })
 
   it('uses timestamp-derived positions and bounded drift correction', () => {

@@ -55,15 +55,24 @@ export function embedBlockReasonFromHeaders(headers: Headers, appOrigin: string)
  * app. It only reads the provider's own policy so the client can fall back
  * cleanly; it never alters or works around that policy.
  */
-export function probeEmbedPolicy(url: string, appOrigin: string): Promise<EmbedBlockReason | null> {
+export function probeEmbedPolicy(url: string, appOrigin: string, refresh = false): Promise<EmbedBlockReason | null> {
   const cacheKey = `${appOrigin}|${url}`
   const cached = cache.get(cacheKey)
-  if (cached && cached.expiresAt > Date.now()) return cached.result
+  if (!refresh && cached && cached.expiresAt > Date.now()) return cached.result
 
   const result = (async () => {
     try {
-      const response = await fetch(url, { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+      const response = await fetch(url, {
+        method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      })
       await response.body?.cancel()
+      // A bot-block page returned to the Worker says nothing about whether the
+      // viewer's browser can load this player, or about the real page's policy.
+      if (!response.ok) {
+        console.warn('Embed policy probe unavailable', { host: new URL(url).hostname, status: response.status })
+        return null
+      }
       return embedBlockReasonFromHeaders(response.headers, appOrigin)
     } catch {
       return null

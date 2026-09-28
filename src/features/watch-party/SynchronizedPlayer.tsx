@@ -4,7 +4,7 @@ import { formatClock } from '../../lib/format'
 import type { PlaybackKind, WatchPartyClientRequest, WatchPartyState } from '../../types/watch-party'
 import { logIframeConfiguration, PLAYER_IFRAME_ALLOW, PLAYER_IFRAME_REFERRER_POLICY } from '../player/player-debug'
 import { driftCorrection, expectedPlaybackPosition } from './sync'
-import { useHlsSource } from './useHlsSource'
+import { useHlsSource } from '../../hooks/useHlsSource'
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 // A rate nudge runs this long before the room's own rate is restored.

@@ -4,7 +4,7 @@
 
 The companion is a Manifest V3 Chromium extension in `packages/watch-sync-extension/`. It controls only native `HTMLVideoElement` instances in user-approved HTTP(S) origins. It does not relay media, inspect or log media URLs, use `MAIN`-world injection, request capture APIs, or permanently inject a player controller across all sites.
 
-The shipped manifest permanently trusts only the Fedora Movies production app and the local preview and dev servers (`127.0.0.1` and `localhost` on ports 4173 and 5173). The list lives once, in `src/protocol.ts`, and feeds both the manifest and the runtime checks. The service worker is split into `src/background/` (`store.ts`, `room-socket.ts`, `frames.ts`, `messages.ts`). Player pages are optional host permissions requested from the popup. The fixture-only manifest pregrants `127.0.0.1:4300` and `:4301` so automated Chromium runs do not depend on browser permission UI.
+The shipped manifest permanently trusts only the Fedora Movies production app and the local preview and dev servers (`127.0.0.1` and `localhost` on ports 4173 and 5173). The list lives once, in `trusted-origins.json`, and feeds both the manifest and the runtime checks; point its first entry at your own deployment before building. The service worker is split into `src/background/` (`store.ts`, `room-socket.ts`, `frames.ts`, `messages.ts`). Player pages are optional host permissions requested from the popup. The fixture-only manifest pregrants `127.0.0.1:4300` and `:4301` so automated Chromium runs do not depend on browser permission UI.
 
 ## Build and load
 

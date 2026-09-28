@@ -1,0 +1,10 @@
+{
+  "$comment": "Pages allowed to hand the extension a watch-party room connection: the deployed app, then the local preview and dev servers. Point the first entry at your own deployment.",
+  "origins": [
+    "https://movie-app.jordanvorster404.workers.dev",
+    "http://127.0.0.1:4173",
+    "http://localhost:4173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173"
+  ]
+}

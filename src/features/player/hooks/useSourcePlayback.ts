@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MediaSource } from '../../../types/media-source'
+import { ApiClientError } from '../../../lib/api-client'
 import { extractPlayer } from '../api'
 import { logIframeConfiguration, playerDebug, urlHost } from '../player-debug'
 import {
@@ -27,8 +28,7 @@ interface SourcePlaybackOptions {
 
 /**
  * Chooses which source plays and drives dynamic sources through extraction
- * and iframe loading. Failed sources are skipped automatically unless the
- * viewer picked one explicitly, so they see that source's own error.
+ * and iframe loading. A failed source switches to another available source.
  */
 export function useSourcePlayback({ playableSources, resetKey, playbackRequested }: SourcePlaybackOptions) {
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
@@ -37,6 +37,8 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
   const [loadedIframeKey, setLoadedIframeKey] = useState<string | null>(null)
   // Bumped by "Reload player" to remount a provider player that got stuck.
   const [playerReload, setPlayerReload] = useState(0)
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null)
+  const refreshSourceIdRef = useRef<string | null>(null)
   const sourceStatesRef = useRef(sourceStates)
   const previousActiveSourceIdRef = useRef<string | null>(null)
   const iframeRevealTimerRef = useRef<number | null>(null)
@@ -50,6 +52,8 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
     setSourceStates({})
     setLoadedIframeKey(null)
     setPlayerReload(0)
+    setFallbackNotice(null)
+    refreshSourceIdRef.current = null
   }, [resetKey])
 
   const failedSourceIds = useMemo(
@@ -66,7 +70,8 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
   const isDynamic = isDynamicSource(activeSource)
   const activeState = activeSource ? sourceStates[activeSource.id] : undefined
   const extractedUrl = activeState?.status === 'ready' ? activeState.extractedUrl : null
-  const iframeKey = activeSource && extractedUrl ? `${activeSource.id}|${extractedUrl}|${playerReload}` : null
+  const playbackKind = activeState?.status === 'ready' ? activeState.playbackKind : 'embed'
+  const iframeKey = activeSource && extractedUrl && playbackKind === 'embed' ? `${activeSource.id}|${extractedUrl}|${playerReload}` : null
   const iframeLoaded = iframeKey !== null && loadedIframeKey === iframeKey
   const fallbackSource = activeSource
     ? playableSources.find((source) => source.id !== activeSource.id && !failedSourceIds.has(source.id))
@@ -78,20 +83,30 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
       ...prev,
       [source.id]: { status: 'failed', reason, message: message ?? SOURCE_FAILURE_MESSAGES[reason] },
     }))
-  }, [])
+    const next = playableSources.find((candidate) => candidate.id !== source.id && sourceStatesRef.current[candidate.id]?.status !== 'failed')
+    if (next) {
+      setSelectedSourceId(next.id)
+      setFallbackNotice(`${getSourceLabel(source)} is unavailable. Trying ${getSourceLabel(next)}.`)
+    }
+  }, [playableSources])
 
   const selectSource = (sourceId: string) => {
     setSelectedSourceId(sourceId)
+    setFallbackNotice(null)
     if (failedSourceIds.has(sourceId)) setSourceStates((prev) => withoutSource(prev, sourceId))
   }
 
   const retryActiveSource = () => {
     if (!activeSource) return
+    refreshSourceIdRef.current = activeSource.id
     setSourceStates((prev) => withoutSource(prev, activeSource.id))
     setExtractionAttempt((attempt) => attempt + 1)
   }
 
-  const reloadPlayer = () => setPlayerReload((count) => count + 1)
+  const reloadPlayer = () => {
+    retryActiveSource()
+    setPlayerReload((count) => count + 1)
+  }
 
   const revealIframe = (loadedKey: string) => {
     if (iframeRevealTimerRef.current !== null) window.clearTimeout(iframeRevealTimerRef.current)
@@ -120,6 +135,7 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
   // A new playback session retries sources that failed in the previous one.
   useEffect(() => {
     if (playbackRequested) return
+    setFallbackNotice(null)
     setLoadedIframeKey(null)
     setSourceStates((prev) => {
       const next = Object.fromEntries(Object.entries(prev).filter(([, state]) => state.status === 'ready'))
@@ -143,9 +159,12 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
     playerDebug('loading source', { sourceId: source.id, label: getSourceLabel(source), host: urlHost(source.sourceUrl) })
     setSourceStates((prev) => ({ ...prev, [source.id]: { status: 'extracting' } }))
 
-    extractPlayer(source.sourceUrl, controller.signal)
+    const refresh = refreshSourceIdRef.current === source.id
+    if (refresh) refreshSourceIdRef.current = null
+    extractPlayer(source.sourceUrl, controller.signal, refresh)
       .then((data) => {
         window.clearTimeout(timeout)
+        if (controller.signal.aborted) return
         if (data.embedBlocked) {
           playerDebug('provider refused embedding', {
             sourceId: source.id,
@@ -155,18 +174,21 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
           markSourceFailed(source, 'embed-blocked')
           return
         }
-        if (!isEmbeddableUrl(data.extractedUrl, source.sourceUrl)) {
+        const kind = data.playbackKind ?? 'embed'
+        if (!isEmbeddableUrl(data.extractedUrl, source.sourceUrl, kind)) {
           markSourceFailed(source, 'no-player')
           return
         }
         const extractedUrl = data.extractedUrl
-        setSourceStates((prev) => ({ ...prev, [source.id]: { status: 'ready', extractedUrl } }))
+        setSourceStates((prev) => ({ ...prev, [source.id]: { status: 'ready', extractedUrl, playbackKind: kind } }))
       })
       .catch((error: unknown) => {
         window.clearTimeout(timeout)
         if (controller.signal.aborted && !timedOut) return
         if (!timedOut) console.error('Extractor failed:', error)
-        markSourceFailed(source, timedOut ? 'extract-timeout' : 'extract-error')
+        const providerUnavailable = error instanceof ApiClientError && error.code === 'PROVIDER_UNAVAILABLE'
+        const providerTimeout = error instanceof ApiClientError && error.code === 'PROVIDER_TIMEOUT'
+        markSourceFailed(source, timedOut || providerTimeout ? 'extract-timeout' : providerUnavailable ? 'provider-unavailable' : 'extract-error')
       })
 
     return () => {
@@ -196,6 +218,8 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
     activeState,
     isDynamic,
     extractedUrl,
+    playbackKind,
+    fallbackNotice,
     iframeKey,
     iframeLoaded,
     fallbackSource,

@@ -1,5 +1,6 @@
 import type { MediaSource } from '../../types/media-source'
 import type { Episode, MediaType } from '../../types/tmdb'
+import type { PlaybackKind } from '../../types/watch-party'
 
 export type SourceFailureReason =
   | 'no-player'
@@ -8,12 +9,13 @@ export type SourceFailureReason =
   | 'load-timeout'
   | 'embed-blocked'
   | 'media-error'
+  | 'provider-unavailable'
 
 // Each source keeps its own player state so one failing source never
 // clobbers another one's progress or error.
 type SourcePlayerState =
   | { status: 'extracting' }
-  | { status: 'ready'; extractedUrl: string }
+  | { status: 'ready'; extractedUrl: string; playbackKind: PlaybackKind }
   | { status: 'failed'; reason: SourceFailureReason; message: string }
 
 export type SourceStates = Record<string, SourcePlayerState>
@@ -25,6 +27,7 @@ export const SOURCE_FAILURE_MESSAGES: Record<SourceFailureReason, string> = {
   'load-timeout': 'The embedded player did not finish loading. You can retry or stop safely.',
   'embed-blocked': "This provider doesn't allow its player to be embedded here. Try another source.",
   'media-error': 'The authorised video could not be loaded. Check the source format and host response.',
+  'provider-unavailable': 'This provider is unavailable. Try another source.',
 }
 
 export function withoutSource(states: SourceStates, sourceId: string) {
@@ -35,26 +38,20 @@ export function withoutSource(states: SourceStates, sourceId: string) {
 }
 
 export function getSourceLabel(source: Pick<MediaSource, 'label'>) {
-  const label = source.label.replace(' Stream (Dynamic)', '')
-  const lowered = label.toLowerCase()
-  if (lowered.includes('flixbaba')) return 'Source 1'
-  if (lowered.includes('soap2day')) return 'Source 2'
-  return label
+  return source.label.replace(' Stream (Dynamic)', '')
 }
 
 export function isDynamicSource(source: MediaSource | undefined) {
-  if (!source) return false
-  const sourceUrl = source.sourceUrl.toLowerCase()
-  return Boolean(source.isDynamic || sourceUrl.includes('flixbaba') || sourceUrl.includes('soap2day'))
+  return Boolean(source?.isDynamic)
 }
 
 /** An extracted player is usable only if it is HTTPS and not the wrapper page itself. */
-export function isEmbeddableUrl(candidate: string | null, wrapperUrl: string): candidate is string {
+export function isEmbeddableUrl(candidate: string | null, wrapperUrl: string, kind: PlaybackKind = 'embed'): candidate is string {
   if (!candidate) return false
   try {
     const extracted = new URL(candidate)
     const wrapper = new URL(wrapperUrl, window.location.origin)
-    return extracted.protocol === 'https:' && extracted.href !== wrapper.href
+    return extracted.protocol === 'https:' && !extracted.username && !extracted.password && (kind !== 'embed' || extracted.href !== wrapper.href)
   } catch {
     return false
   }

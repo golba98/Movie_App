@@ -1,9 +1,32 @@
 import { env } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PASSWORD_ITERATIONS } from '../auth/crypto'
 import { activeViewerCookies, adminCookie, cookieFrom, createAccount, origin, request } from './helpers'
 
 describe('viewer authentication and account controls', () => {
+  it('runs the full password check even for an unknown username', async () => {
+    const deriveBits = vi.spyOn(crypto.subtle, 'deriveBits')
+    try {
+      const response = await request('/api/auth/login', {
+        method: 'POST',
+        origin,
+        body: { username: 'nobody-by-this-name', password: 'some-password-123' },
+      })
+      expect(response.status).toBe(401)
+      // Equal work for real and unknown usernames keeps response timing from revealing accounts.
+      expect(deriveBits).toHaveBeenCalledTimes(1)
+      expect((deriveBits.mock.calls[0][0] as Pbkdf2Params).iterations).toBe(PASSWORD_ITERATIONS)
+    } finally {
+      deriveBits.mockRestore()
+    }
+  })
+
+  it('never seeds the local tester account on a deployed host', async () => {
+    expect((await request('/api/auth/session')).status).toBe(401)
+    const tester = await env.DB.prepare("SELECT id FROM accounts WHERE username_normalized = 'tester'").first()
+    expect(tester).toBeNull()
+  })
+
   it('requires the first password change and syncs favourites after it', async () => {
     const admin = await adminCookie()
     await createAccount(admin)

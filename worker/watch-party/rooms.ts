@@ -94,30 +94,10 @@ export function roomSummary(row: RoomRow, state: WatchPartyState | null): WatchP
   }
 }
 
-// Unit tests keep rooms on catalog files; everywhere else any source may be shared.
-function isWatchPartyCompatibleSource(sourceUrl: string, env: Env) {
-  if (env.TMDB_ACCESS_TOKEN !== 'unit-test-tmdb-token') return true
-  const normalized = sourceUrl.toLowerCase()
-  return !normalized.includes('flixbaba') && !normalized.includes('soap2day')
-}
-
 /** The active source a room plays, whether a catalog file or a search provider's page. */
 export async function findRoomSource(env: Env, sourceId: string, title: string): Promise<RoomSource | null> {
-  let source: RoomSource | null
-  if (isDynamicSourceId(sourceId)) {
-    const dynamic = await resolveDynamicSource(env.DB, sourceId, title)
-    source = dynamic && {
-      id: dynamic.id,
-      media_type: dynamic.mediaType,
-      tmdb_id: dynamic.tmdbId,
-      season_number: 0,
-      episode_number: 0,
-      label: dynamic.label,
-      source_url: dynamic.sourceUrl,
-      mime_type: 'video/mp4',
-    }
-  } else {
-    source = await env.DB
+  if (!isDynamicSourceId(sourceId)) {
+    return env.DB
       .prepare(
         `SELECT id, media_type, tmdb_id, season_number, episode_number, label, source_url, mime_type
          FROM media_sources WHERE id = ? AND is_active = 1`,
@@ -125,5 +105,16 @@ export async function findRoomSource(env: Env, sourceId: string, title: string):
       .bind(sourceId)
       .first<RoomSource>()
   }
-  return source && isWatchPartyCompatibleSource(source.source_url, env) ? source : null
+  const dynamic = await resolveDynamicSource(env.DB, sourceId, title)
+  if (!dynamic) return null
+  return {
+    id: dynamic.id,
+    media_type: dynamic.mediaType,
+    tmdb_id: dynamic.tmdbId,
+    season_number: 0,
+    episode_number: 0,
+    label: dynamic.label,
+    source_url: dynamic.sourceUrl,
+    mime_type: 'video/mp4',
+  }
 }

@@ -46,6 +46,8 @@ export async function mockApi(page: Page) {
       baseUrl: 'https://flixbaba.mov',
       movieUrlPattern: '{baseUrl}/movie/{tmdbId}/{slug}/watch',
       tvUrlPattern: '{baseUrl}/tv/{tmdbId}/{slug}',
+      movieEmbedPattern: '',
+      tvEmbedPattern: '',
       active: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),

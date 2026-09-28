@@ -1,5 +1,5 @@
 import { ApiError, json, readJson } from '../http'
-import { hashPassword, verifyPassword } from './crypto'
+import { hashPassword, PASSWORD_ITERATIONS, verifyPassword } from './crypto'
 import {
   createUserSession,
   expiredCookie,
@@ -12,10 +12,11 @@ import {
   type AccountRow,
 } from './sessions'
 
-// Stand-ins so an unknown username goes through the same password check as a real one.
+// Stand-ins so an unknown username costs the same full PBKDF2 run as a real
+// one; otherwise response time would reveal which usernames exist.
 const DUMMY_SALT = 'AAAAAAAAAAAAAAAAAAAAAA'
 const DUMMY_HASH = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-const DUMMY_ITERATIONS = 600_000
+const DUMMY_ITERATIONS = PASSWORD_ITERATIONS
 
 export async function viewerLogin(request: Request, env: Env) {
   const body = await readJson<{ username?: unknown; password?: unknown }>(request)

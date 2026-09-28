@@ -168,7 +168,7 @@ export async function handleApi(request: Request, env: Env) {
   // The extension's dev-connect call comes from a chrome-extension:// origin.
   if (path !== DEV_CONNECT_PATH) assertSameOrigin(request)
 
-  if (env.TMDB_ACCESS_TOKEN !== 'unit-test-tmdb-token') await ensureTesterAccount(env.DB)
+  await ensureTesterAccount(request, env.DB)
 
   const matched = matchRoute(path)
   if (matched) return dispatch(request, env, matched.route, matched.params)
