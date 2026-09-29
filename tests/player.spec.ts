@@ -1,6 +1,14 @@
 import { expect, test } from '@playwright/test'
 import { mockApi } from './support/mock-api'
-import { fallbackSources, mockDynamicShow, mockTwoSourcePlayer, openShowResumingAt } from './support/player'
+import {
+  fallbackSources,
+  mockDynamicShow,
+  mockTwoSourcePlayer,
+  mockVsembedShow,
+  openShowResumingAt,
+  providerCommands,
+  sendProviderEvent,
+} from './support/player'
 
 test.beforeEach(async ({ page }) => {
   await mockApi(page)
@@ -621,4 +629,124 @@ test('Source 1 progress messages mark the final episode of a season watched and 
   await expect(player.getByRole('button', { name: /^Watch next/ })).toHaveText('Watch next · S2 E1')
   const lastEpisode = player.locator('[data-episode="20"]')
   await expect(lastEpisode.getByRole('button', { name: 'Mark as unwatched' })).toBeVisible()
+})
+
+test('Source 1 resumes an unfinished episode at its saved position', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 15, { position: 400, duration: 1000 })
+
+  const player = page.locator('#streaming-player')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&startAt=400')
+})
+
+// Source 1 falls over to another stream host mid-episode and that host starts
+// at 0:00; the app sends it back to where the viewer was.
+test('a provider restart mid-episode is sent back to where the viewer was and never overwrites progress', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await sendProviderEvent(page, 'playing', 600)
+  await sendProviderEvent(page, 'playing', 3)
+  await expect.poll(() => providerCommands(page)).toContainEqual({ player: true, action: 'seek600' })
+
+  // Playing again starts where the viewer was, not where the restart left off.
+  await player.getByRole('button', { name: 'Stop player' }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', /[?&]startAt=600$/)
+})
+
+test('a viewer seeking back in the provider player is not undone', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await sendProviderEvent(page, 'playing', 600)
+  // The browser reports the new time just before the seek completes.
+  await sendProviderEvent(page, 'playing', 30)
+  await sendProviderEvent(page, 'seeked', 30)
+  await page.waitForTimeout(2_500)
+  expect(await providerCommands(page)).toEqual([])
+
+  await player.getByRole('button', { name: 'Stop player' }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', /[?&]startAt=30$/)
+})
+
+test('an episode picked inside the provider player is neither recorded nor treated as a restart', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await sendProviderEvent(page, 'playing', 600)
+  await sendProviderEvent(page, 'playing', 5, { season: 1, episode: 16 })
+  await page.waitForTimeout(2_500)
+  expect(await providerCommands(page)).toEqual([])
+
+  await player.getByRole('button', { name: 'Stop player' }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', /[?&]startAt=600$/)
+})
+
+test('leaving theater mode keeps the provider player running inline', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await mockDynamicShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  await page.getByRole('button', { name: 'Resume S1 E15' }).click()
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await iframe.evaluate((element) => {
+    (window as typeof window & { __theaterFrame?: Element }).__theaterFrame = element
+  })
+
+  await page.getByRole('button', { name: 'Exit theater mode' }).click()
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toHaveCount(0)
+  await expect(player.getByText('Ready when you are')).toHaveCount(0)
+  expect(await iframe.evaluate((element) => element === (window as typeof window & { __theaterFrame?: Element }).__theaterFrame)).toBe(true)
+  await expect(player.getByRole('button', { name: 'Stop player' })).toBeVisible()
+})
+
+test('@mobile the Watch next prompt sits in the centre of the player, inline and in theater mode', async ({ page }) => {
+  const reported = await mockDynamicShow(page)
+  reported.time = 950
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  const shell = page.getByTestId('player-shell')
+  const prompt = player.getByRole('button', { name: /^Watch next/ }).locator('..')
+  const centre = async (locator: typeof shell) => {
+    const box = await locator.boundingBox()
+    expect(box).not.toBeNull()
+    return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }
+  }
+  const expectCentred = async () => {
+    const [promptCentre, shellCentre] = await Promise.all([centre(prompt), centre(shell)])
+    expect(Math.abs(promptCentre.x - shellCentre.x)).toBeLessThanOrEqual(2)
+    expect(Math.abs(promptCentre.y - shellCentre.y)).toBeLessThanOrEqual(2)
+  }
+
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(prompt).toBeVisible()
+  await prompt.scrollIntoViewIfNeeded()
+  await expectCentred()
+
+  await player.getByRole('button', { name: 'Theater mode' }).click()
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+  await expectCentred()
 })

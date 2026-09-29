@@ -7,6 +7,8 @@ import type { EpisodeListing } from './sources'
 const EMBED_START_PARAMS: Record<string, string> = {
   'vidlink.pro': 'startAt',
   'player.videasy.net': 'progress',
+  // Source 1. It ignores its own saved position when the URL names an episode.
+  'vsembed.ru': 'startAt',
 }
 
 export function withStartTime(url: string, seconds: number | null | undefined) {

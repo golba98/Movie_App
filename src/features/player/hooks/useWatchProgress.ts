@@ -5,6 +5,7 @@ import { MIN_COUNTED_WATCH_SECONDS, WATCHED_THRESHOLD } from '../../watch-histor
 import { useWatchedHistory } from '../../watch-history/watch-history-context'
 import { useEmbedProgress } from './useEmbedProgress'
 import { usePlaybackWatcher, type WatcherUpdateReason } from './usePlaybackWatcher'
+import { useRestartRecovery } from './useRestartRecovery'
 
 const PROGRESS_SAVE_INTERVAL_MS = 5_000
 // Saved positions outside this window restart the title instead of resuming.
@@ -29,7 +30,7 @@ interface WatchProgressOptions {
  * a title enters history only after MIN_COUNTED_WATCH_SECONDS, and is
  * finished once watch time covers WATCHED_THRESHOLD of its runtime. A player
  * that reports its own position is trusted over watch time for resuming and
- * finishing.
+ * finishing, except while it has restarted on its own (see useRestartRecovery).
  */
 export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMinutes, active, iframeRef }: WatchProgressOptions) {
   const { mediaType, id } = media
@@ -98,7 +99,8 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
     commitWatch(readWatchSeconds(), mode === 'urgent')
   }, [watched, commitWatch, readWatchSeconds])
 
-  useEmbedProgress(iframeRef, ({ position, duration }) => saveProgress(position, duration))
+  const onEmbedProgress = useRestartRecovery({ iframeRef, active, sessionKey, seasonNumber, episodeNumber, onProgress: saveProgress })
+  useEmbedProgress(iframeRef, onEmbedProgress)
 
   /** Saves the latest watch time straight away, e.g. before reloading the player. */
   const flush = useCallback(() => commitWatch(readWatchSeconds(), true), [commitWatch, readWatchSeconds])

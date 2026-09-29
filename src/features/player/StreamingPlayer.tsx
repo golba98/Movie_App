@@ -75,6 +75,12 @@ export function StreamingPlayer({
     continuePlaybackRef.current = false
   }, [resetKey])
 
+  // Playback started in theater mode carries on inline when theater mode closes,
+  // instead of unloading the player and starting it again.
+  useEffect(() => {
+    if (theaterMode) setInlinePlaybackRequested(true)
+  }, [theaterMode, resetKey])
+
   // Whether this episode was already watched when it opened, so the prompt
   // only appears for an episode finished in this sitting, not on a rewatch.
   const episodeWatched = isTv && isEpisodeWatched(id, season, episode)
