@@ -1,4 +1,4 @@
-import { Maximize2, RotateCw, X } from 'lucide-react'
+import { Maximize2, RotateCw, SkipForward, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 function ToolbarButton({ label, title, onClick, children }: { label: string; title: string; onClick: () => void; children: ReactNode }) {
@@ -19,10 +19,12 @@ interface PlayerToolbarProps {
   heading: string
   onReload?: () => void
   onStop?: () => void
+  // Set when there is an episode after this one.
+  onNext?: () => void
   onTheater: () => void
 }
 
-export function PlayerToolbar({ heading, onReload, onStop, onTheater }: PlayerToolbarProps) {
+export function PlayerToolbar({ heading, onReload, onStop, onNext, onTheater }: PlayerToolbarProps) {
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1">
       <div className="min-w-0">
@@ -32,6 +34,11 @@ export function PlayerToolbar({ heading, onReload, onStop, onTheater }: PlayerTo
         {onReload && (
           <ToolbarButton label="Reload player" title="Stuck loading? Reload player" onClick={onReload}>
             <RotateCw size={17} aria-hidden="true" />
+          </ToolbarButton>
+        )}
+        {onNext && (
+          <ToolbarButton label="Next episode" title="Next episode" onClick={onNext}>
+            <SkipForward size={17} aria-hidden="true" />
           </ToolbarButton>
         )}
         {onStop && (

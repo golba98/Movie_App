@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { mockApi, watchServer } from './support/mock-api'
-import { fallbackSources, mockTwoSourcePlayer } from './support/player'
+import { mockApi } from './support/mock-api'
+import { fallbackSources, mockDynamicShow, mockTwoSourcePlayer, openShowResumingAt } from './support/player'
 
 test.beforeEach(async ({ page }) => {
   await mockApi(page)
@@ -515,52 +515,8 @@ test('@mobile HLS resolution loads the playlist through the native video player'
 
 test('the episode list opens scrolled to and highlighting the episode being resumed', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
-  const episodes = Array.from({ length: 20 }, (_, index) => ({
-    id: 2000 + index,
-    name: `Episode title ${index + 1}`,
-    overview: 'An episode of the long running season.',
-    episode_number: index + 1,
-    season_number: 1,
-    still_path: null,
-    air_date: '2015-12-14',
-  }))
-  await page.route('**/api/tmdb/tv/10/season/1?*', async (route) => {
-    await route.fulfill({ json: { id: 101, season_number: 1, episodes } })
-  })
-  await page.route('**/api/media-sources/tv/10', async (route) => {
-    await route.fulfill({
-      json: {
-        data: {
-          sources: [{
-            id: 'flixbaba-default',
-            mediaType: 'tv',
-            tmdbId: 10,
-            seasonNumber: null,
-            episodeNumber: null,
-            label: 'Flixbaba Stream (Dynamic)',
-            sourceUrl: 'https://flixbaba.mov/tv/10/the-expanse',
-            mimeType: 'video/mp4',
-            rightsBasis: 'licensed',
-            isDynamic: true,
-          }],
-        },
-      },
-    })
-  })
-  const now = Date.now()
-  watchServer.entries.set('tv:10:1:15', { watched: false, watchSeconds: 600, updatedAt: now })
-  watchServer.titles.set('tv:10', {
-    mediaType: 'tv',
-    id: 10,
-    seasonNumber: 1,
-    episodeNumber: 15,
-    item: { id: 10, mediaType: 'tv', title: 'The Expanse', overview: '', posterPath: '/expanse.jpg', backdropPath: null, voteAverage: 8.1, date: null, year: null },
-    updatedAt: now,
-  })
-
-  await page.goto('/')
-  await expect(page.locator('#continue-watching').locator('article', { hasText: 'The Expanse' })).toBeVisible()
-  await page.goto('/tv/10')
+  await mockDynamicShow(page)
+  await openShowResumingAt(page, 1, 15)
 
   const player = page.locator('#streaming-player')
   await expect(player.getByRole('heading', { name: 'The Expanse — S1 E15' })).toBeVisible()
@@ -575,4 +531,80 @@ test('the episode list opens scrolled to and highlighting the episode being resu
     return Boolean(listBox && itemBox && itemBox.y >= listBox.y && itemBox.y + itemBox.height <= listBox.y + listBox.height)
   }).toBe(true)
   expect(await page.getByRole('heading', { name: 'The Expanse', exact: true }).evaluate((heading) => heading.closest('[data-lenis-prevent]')?.scrollTop)).toBe(0)
+})
+
+test('a finished episode offers the next one, which starts without another click', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const reported = await mockDynamicShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  const watchNext = player.getByRole('button', { name: /^Watch next/ })
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.locator('iframe')).toHaveClass(/opacity-100/)
+  await expect(player.getByRole('button', { name: 'Next episode' })).toBeVisible()
+  await expect(watchNext).toHaveCount(0)
+
+  // The provider reports the credits; the episode is now finished.
+  reported.time = 950
+  await player.getByRole('button', { name: 'Reload player' }).click()
+  await expect(watchNext).toHaveText('Watch next · S1 E16 — Episode title 16')
+
+  await watchNext.click()
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E16' })).toBeVisible()
+  await expect(player.getByRole('button', { name: /Episode title 16\b/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://player.example.test/embed/tv/10/1/16')
+  await expect(player.getByText('Ready when you are')).toHaveCount(0)
+  await expect(watchNext).toHaveCount(0)
+})
+
+test('the next episode continues into the next season, can be dismissed, and ends with the show', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const reported = await mockDynamicShow(page)
+  reported.time = 950
+  await openShowResumingAt(page, 1, 20)
+
+  const player = page.locator('#streaming-player')
+  const watchNext = player.getByRole('button', { name: /^Watch next/ })
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(watchNext).toHaveText('Watch next · S2 E1')
+  await player.getByRole('button', { name: 'Dismiss next episode' }).click()
+  await expect(watchNext).toHaveCount(0)
+
+  // A rewatch of a finished episode doesn't prompt, but can still move on.
+  await player.getByRole('button', { name: /Episode title 19\b/ }).click()
+  await player.getByRole('button', { name: /Episode title 20\b/ }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.locator('iframe')).toHaveClass(/opacity-100/)
+  await expect(watchNext).toHaveCount(0)
+
+  await player.getByRole('button', { name: 'Next episode' }).click()
+  await expect(player.getByRole('heading', { name: 'The Expanse — S2 E1' })).toBeVisible()
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://player.example.test/embed/tv/10/2/1')
+
+  await player.getByRole('button', { name: 'Season 2' }).click()
+  await player.getByRole('button', { name: 'Season 6' }).click()
+  await player.getByRole('button', { name: /Episode title 20\b/ }).click()
+  await expect(player.getByRole('heading', { name: 'The Expanse — S6 E20' })).toBeVisible()
+  await expect(player.getByRole('button', { name: 'Next episode' })).toHaveCount(0)
+})
+
+test('the next episode prompt works in theater mode and keeps the theater open', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const reported = await mockDynamicShow(page)
+  reported.time = 950
+  await openShowResumingAt(page, 1, 15)
+
+  await page.getByRole('button', { name: 'Resume S1 E15' }).click()
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+  const watchNext = page.getByRole('button', { name: /^Watch next/ })
+  await expect(watchNext).toBeVisible()
+  await expect(watchNext).toBeInViewport()
+
+  await watchNext.click()
+  const player = page.locator('#streaming-player')
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://player.example.test/embed/tv/10/1/16')
+  await expect(player.locator('iframe')).toHaveClass(/opacity-100/)
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+  await expect(watchNext).toHaveCount(0)
 })

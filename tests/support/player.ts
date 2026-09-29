@@ -1,5 +1,6 @@
-import type { Page, Route } from '@playwright/test'
+import { expect, type Page, type Route } from '@playwright/test'
 import { movie, detailsExtras } from './fixtures'
+import { watchServer } from './mock-api'
 
 export const fallbackSources = [
   {
@@ -84,4 +85,78 @@ export async function useSilentDynamicMovie(page: Page, runtimeMinutes: number) 
     (url) => url.pathname === '/api/tmdb/movie/1',
     (route) => route.fulfill({ json: { ...movie, runtime: runtimeMinutes, ...detailsExtras } }),
   )
+}
+
+const SHOW_SEASON_EPISODES = 20
+
+/**
+ * Serves The Expanse (6 seasons of 20 episodes) through one dynamic provider
+ * whose embed reports `reported.time` of a 1000-second episode when it loads.
+ */
+export async function mockDynamicShow(page: Page) {
+  const reported = { time: 100 }
+  await page.route('**/api/tmdb/tv/10/season/*', async (route) => {
+    const seasonNumber = Number(new URL(route.request().url()).pathname.split('/').pop())
+    const episodes = Array.from({ length: SHOW_SEASON_EPISODES }, (_, index) => ({
+      id: seasonNumber * 1000 + index,
+      name: `Episode title ${index + 1}`,
+      overview: 'An episode of the long running season.',
+      episode_number: index + 1,
+      season_number: seasonNumber,
+      still_path: null,
+      air_date: '2015-12-14',
+    }))
+    await route.fulfill({ json: { id: 100 + seasonNumber, season_number: seasonNumber, episodes } })
+  })
+  await page.route('**/api/media-sources/tv/10', async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          sources: [{
+            id: 'flixbaba-default',
+            mediaType: 'tv',
+            tmdbId: 10,
+            seasonNumber: null,
+            episodeNumber: null,
+            label: 'Flixbaba Stream (Dynamic)',
+            sourceUrl: 'https://flixbaba.mov/tv/10/the-expanse',
+            mimeType: 'video/mp4',
+            rightsBasis: 'licensed',
+            isDynamic: true,
+          }],
+        },
+      },
+    })
+  })
+  await page.route('**/api/media-sources/extract**', async (route) => {
+    const wrapper = new URL(new URL(route.request().url()).searchParams.get('url') ?? '')
+    const [season, episode] = [wrapper.pathname.split('/').pop(), wrapper.searchParams.get('e')]
+    await route.fulfill({ json: { data: { extractedUrl: `https://player.example.test/embed/tv/10/${season}/${episode}` } } })
+  })
+  await page.route('https://player.example.test/**', async (route) => {
+    const message = JSON.stringify({ type: 'PLAYER_EVENT', data: { event: 'timeupdate', currentTime: reported.time, duration: 1000 } })
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: `<!doctype html><title>Test player</title><script>parent.postMessage(${message}, '*')</script>`,
+    })
+  })
+  return reported
+}
+
+/** Records an unfinished episode in the account's history and opens the show there. */
+export async function openShowResumingAt(page: Page, seasonNumber: number, episodeNumber: number) {
+  const now = Date.now()
+  watchServer.entries.set(`tv:10:${seasonNumber}:${episodeNumber}`, { watched: false, watchSeconds: 600, updatedAt: now })
+  watchServer.titles.set('tv:10', {
+    mediaType: 'tv',
+    id: 10,
+    seasonNumber,
+    episodeNumber,
+    item: { id: 10, mediaType: 'tv', title: 'The Expanse', overview: '', posterPath: '/expanse.jpg', backdropPath: null, voteAverage: 8.1, date: null, year: null },
+    updatedAt: now,
+  })
+  await page.goto('/')
+  await expect(page.locator('#continue-watching').locator('article', { hasText: 'The Expanse' })).toBeVisible()
+  await page.goto('/tv/10')
 }

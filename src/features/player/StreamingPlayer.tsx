@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MediaSource } from '../../types/media-source'
 import type { MediaItem, MediaType } from '../../types/tmdb'
 import { useWatchedHistory } from '../watch-history/watch-history-context'
-import { withStartTime } from './episodes'
+import { nextEpisode, withStartTime } from './episodes'
 import { useEpisodeSelection } from './hooks/useEpisodeSelection'
 import { useSourcePlayback } from './hooks/useSourcePlayback'
 import { useTheaterFullscreen } from './hooks/useTheaterFullscreen'
@@ -13,6 +13,7 @@ import { useWatchProgress } from './hooks/useWatchProgress'
 import { DynamicPlayerStage, type DynamicStage } from './parts/DynamicPlayerStage'
 import { EmptyPlayer } from './parts/EmptyPlayer'
 import { EpisodeSidebar } from './parts/EpisodeSidebar'
+import { NextEpisodePrompt } from './parts/NextEpisodePrompt'
 import { NativeVideoPlayer } from './parts/NativeVideoPlayer'
 import { PlayerToolbar } from './parts/PlayerToolbar'
 import { SourceSwitcher } from './parts/SourceSwitcher'
@@ -67,9 +68,20 @@ export function StreamingPlayer({
   const { activeSource, activeState, isDynamic, iframeKey, iframeLoaded } = playback
   const playsNative = !isDynamic || (playbackRequested && activeState?.status === 'ready' && playback.playbackKind !== 'embed')
 
+  // Set by "Watch next" so the next episode starts without another click.
+  const continuePlaybackRef = useRef(false)
   useEffect(() => {
-    setInlinePlaybackRequested(false)
+    setInlinePlaybackRequested(continuePlaybackRef.current)
+    continuePlaybackRef.current = false
   }, [resetKey])
+
+  // Whether this episode was already watched when it opened, so the prompt
+  // only appears for an episode finished in this sitting, not on a rewatch.
+  const episodeWatched = isTv && isEpisodeWatched(id, season, episode)
+  const [watchedAtOpen, setWatchedAtOpen] = useState({ key: resetKey, watched: episodeWatched })
+  if (watchedAtOpen.key !== resetKey) setWatchedAtOpen({ key: resetKey, watched: episodeWatched })
+  const finishedThisSitting = episodeWatched && watchedAtOpen.key === resetKey && !watchedAtOpen.watched
+  const [dismissedPromptKey, setDismissedPromptKey] = useState<string | null>(null)
 
   const exitTheater = useCallback(() => onTheaterModeChange(false), [onTheaterModeChange])
   useTheaterMode(theaterMode, exitTheater, exitButtonRef)
@@ -92,6 +104,10 @@ export function StreamingPlayer({
     () => episodeListings(sources, selection.episodes, id, season),
     [sources, selection.episodes, id, season],
   )
+  // Unknown while the season's episodes are loading or unavailable.
+  const next = isTv && !selection.loadingEpisodes && listings.length > 0
+    ? nextEpisode(listings, season, episode, selection.availableSeasons)
+    : null
 
   if (!activeSource) return <EmptyPlayer />
 
@@ -114,6 +130,19 @@ export function StreamingPlayer({
 
   const stopPlayback = () => setInlinePlaybackRequested(false)
 
+  const watchNext = (keepPlaying: boolean) => {
+    if (!next) return
+    progress.flush()
+    continuePlaybackRef.current = keepPlaying
+    if (next.seasonNumber === season) selection.selectEpisode(next.episodeNumber)
+    else selection.selectSeason(next.seasonNumber)
+  }
+  const nextLabel = next ? `S${next.seasonNumber} E${next.episodeNumber}` : null
+  const nextName = next?.seasonNumber === season
+    ? listings.find((listing) => listing.episodeNumber === next.episodeNumber)?.episode?.name
+    : undefined
+  const showsNextPrompt = Boolean(nextLabel) && (playsNative || (showsIframe && iframeLoaded)) && finishedThisSitting && dismissedPromptKey !== resetKey
+
   // The provider's own buffering spinner lives inside its cross-origin frame,
   // where we can't clear it; reloading the frame at the last saved position is
   // the way out when it sticks. Save first so it resumes from the latest point.
@@ -130,6 +159,7 @@ export function StreamingPlayer({
             heading={`${title}${isTv ? ` — S${season} E${episode}` : ''}`}
             onReload={showsIframe && !theaterMode ? reloadPlayer : undefined}
             onStop={isDynamic && inlinePlaybackRequested && !theaterMode ? stopPlayback : undefined}
+            onNext={next ? () => watchNext(inlinePlaybackRequested) : undefined}
             onTheater={() => onTheaterModeChange(true)}
           />
 
@@ -182,6 +212,14 @@ export function StreamingPlayer({
               >
                 <RotateCw size={18} aria-hidden="true" />
               </button>
+            )}
+            {showsNextPrompt && nextLabel && (
+              <NextEpisodePrompt
+                label={nextLabel}
+                episodeName={nextName}
+                onWatch={() => watchNext(true)}
+                onDismiss={() => setDismissedPromptKey(resetKey)}
+              />
             )}
             {!playsNative ? (
               <DynamicPlayerStage

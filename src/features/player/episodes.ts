@@ -1,5 +1,6 @@
 import type { MediaSource } from '../../types/media-source'
 import type { EpisodeRef } from '../../types/watch-history'
+import type { EpisodeListing } from './sources'
 
 // Embed hosts known to accept a start offset, and the query parameter they read.
 // Hosts not listed here are left untouched, so resume falls back to the episode.
@@ -47,4 +48,23 @@ export function resolveStartEpisode(sources: MediaSource[], target: EpisodeRef |
   const next = targetIndex === -1 ? undefined : episodes[targetIndex + 1]
   if (next) return { seasonNumber: next.seasonNumber, episodeNumber: next.episodeNumber }
   return { seasonNumber: target.seasonNumber, episodeNumber: target.episodeNumber + 1 }
+}
+
+/**
+ * The episode after the current one: the next listed episode in this season,
+ * else the first episode of the next season, else null at the end of the show.
+ * Next-season episodes are resolved by selectSeason, so only the season is set.
+ */
+export function nextEpisode(
+  listings: Pick<EpisodeListing, 'episodeNumber'>[],
+  season: number,
+  episode: number,
+  seasons: number[],
+): EpisodeRef | null {
+  const laterInSeason = listings
+    .map(({ episodeNumber }) => episodeNumber)
+    .filter((episodeNumber) => episodeNumber > episode)
+  if (laterInSeason.length > 0) return { seasonNumber: season, episodeNumber: Math.min(...laterInSeason) }
+  const nextSeason = seasons.find((candidate) => candidate > season)
+  return nextSeason === undefined ? null : { seasonNumber: nextSeason, episodeNumber: 1 }
 }
