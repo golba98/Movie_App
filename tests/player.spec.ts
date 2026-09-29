@@ -608,3 +608,17 @@ test('the next episode prompt works in theater mode and keeps the theater open',
   await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
   await expect(watchNext).toHaveCount(0)
 })
+
+test('Source 1 progress messages mark the final episode of a season watched and offer the next season', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const reported = await mockDynamicShow(page)
+  reported.format = 'vsembed'
+  reported.time = 950
+  await openShowResumingAt(page, 1, 20)
+
+  const player = page.locator('#streaming-player')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.getByRole('button', { name: /^Watch next/ })).toHaveText('Watch next · S2 E1')
+  const lastEpisode = player.locator('[data-episode="20"]')
+  await expect(lastEpisode.getByRole('button', { name: 'Mark as unwatched' })).toBeVisible()
+})

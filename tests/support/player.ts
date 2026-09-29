@@ -91,10 +91,11 @@ const SHOW_SEASON_EPISODES = 20
 
 /**
  * Serves The Expanse (6 seasons of 20 episodes) through one dynamic provider
- * whose embed reports `reported.time` of a 1000-second episode when it loads.
+ * whose embed reports `reported.time` of a 1000-second episode when it loads,
+ * in the message shape `reported.format` uses.
  */
 export async function mockDynamicShow(page: Page) {
-  const reported = { time: 100 }
+  const reported: { time: number; format: 'timeupdate' | 'vsembed' } = { time: 100, format: 'timeupdate' }
   await page.route('**/api/tmdb/tv/10/season/*', async (route) => {
     const seasonNumber = Number(new URL(route.request().url()).pathname.split('/').pop())
     const episodes = Array.from({ length: SHOW_SEASON_EPISODES }, (_, index) => ({
@@ -134,7 +135,10 @@ export async function mockDynamicShow(page: Page) {
     await route.fulfill({ json: { data: { extractedUrl: `https://player.example.test/embed/tv/10/${season}/${episode}` } } })
   })
   await page.route('https://player.example.test/**', async (route) => {
-    const message = JSON.stringify({ type: 'PLAYER_EVENT', data: { event: 'timeupdate', currentTime: reported.time, duration: 1000 } })
+    // vsembed (Source 1) posts an object with its own field names.
+    const message = reported.format === 'vsembed'
+      ? JSON.stringify({ type: 'PLAYER_EVENT', data: { player_status: 'playing', player_progress: reported.time, player_duration: 1000 } })
+      : JSON.stringify(JSON.stringify({ type: 'PLAYER_EVENT', data: { event: 'timeupdate', currentTime: reported.time, duration: 1000 } }))
     await route.fulfill({
       status: 200,
       contentType: 'text/html',

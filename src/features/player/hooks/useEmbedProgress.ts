@@ -9,6 +9,7 @@ function toNumber(value: unknown) {
 
 // Embedded providers report progress in different shapes, e.g.
 // { type: 'PLAYER_EVENT', data: { event: 'timeupdate', currentTime, duration } },
+// { type: 'PLAYER_EVENT', data: { player_progress, player_duration } } (vsembed, seconds),
 // { currentTime, duration }, { timestamp, duration } or { progress: 0-100, duration }.
 function parseEmbedProgress(raw: unknown): PlaybackProgress | null {
   let data = raw
@@ -23,9 +24,12 @@ function parseEmbedProgress(raw: unknown): PlaybackProgress | null {
   if (isRecord(data.data)) data = data.data
   if (!isRecord(data)) return null
 
-  const duration = toNumber(data.duration)
+  const duration = toNumber(data.duration) ?? toNumber(data.player_duration)
   if (!duration || duration <= 0) return null
-  const position = toNumber(data.currentTime) ?? toNumber(data.time) ?? toNumber(data.timestamp)
+  const position = toNumber(data.currentTime)
+    ?? toNumber(data.time)
+    ?? toNumber(data.timestamp)
+    ?? toNumber(data.player_progress)
   if (position !== null) return position >= 0 ? { position: Math.min(position, duration), duration } : null
   const percent = toNumber(data.progress)
   if (percent !== null && percent >= 0 && percent <= 100) return { position: (percent / 100) * duration, duration }
