@@ -89,12 +89,16 @@ export async function useSilentDynamicMovie(page: Page, runtimeMinutes: number) 
 
 const SHOW_SEASON_EPISODES = 20
 
+type EmbedUrl = (season: string | undefined, episode: string | null) => string
+
+const exampleEmbedUrl: EmbedUrl = (season, episode) => `https://player.example.test/embed/tv/10/${season}/${episode}`
+
 /**
  * Serves The Expanse (6 seasons of 20 episodes) through one dynamic provider
  * whose embed reports `reported.time` of a 1000-second episode when it loads,
  * in the message shape `reported.format` uses.
  */
-export async function mockDynamicShow(page: Page) {
+export async function mockDynamicShow(page: Page, embedUrl: EmbedUrl = exampleEmbedUrl) {
   const reported: { time: number; format: 'timeupdate' | 'vsembed' } = { time: 100, format: 'timeupdate' }
   await page.route('**/api/tmdb/tv/10/season/*', async (route) => {
     const seasonNumber = Number(new URL(route.request().url()).pathname.split('/').pop())
@@ -132,7 +136,7 @@ export async function mockDynamicShow(page: Page) {
   await page.route('**/api/media-sources/extract**', async (route) => {
     const wrapper = new URL(new URL(route.request().url()).searchParams.get('url') ?? '')
     const [season, episode] = [wrapper.pathname.split('/').pop(), wrapper.searchParams.get('e')]
-    await route.fulfill({ json: { data: { extractedUrl: `https://player.example.test/embed/tv/10/${season}/${episode}` } } })
+    await route.fulfill({ json: { data: { extractedUrl: embedUrl(season, episode) } } })
   })
   await page.route('https://player.example.test/**', async (route) => {
     // vsembed (Source 1) posts an object with its own field names.
@@ -148,10 +152,65 @@ export async function mockDynamicShow(page: Page) {
   return reported
 }
 
+const VSEMBED_FRAME = /^https:\/\/vsembed\.ru\//
+
+/**
+ * Serves The Expanse through Source 1's embed host, vsembed. The stub player
+ * records every message the app sends it in `window.__commands`; tests post
+ * the provider's own events from inside it with `sendProviderEvent`.
+ */
+export async function mockVsembedShow(page: Page) {
+  await mockDynamicShow(page, (season, episode) => `https://vsembed.ru/embed/tv?tmdb=10&season=${season}&episode=${episode}`)
+  await page.route('https://vsembed.ru/**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/html',
+    body: `<!doctype html><title>Source 1 player</title><script>
+      window.__commands = []
+      addEventListener('message', (event) => { if (event.source === parent) window.__commands.push(event.data) })
+    </script>`,
+  }))
+}
+
+function vsembedFrame(page: Page) {
+  const frame = page.frame({ url: VSEMBED_FRAME })
+  if (!frame) throw new Error('The Source 1 player frame is not loaded.')
+  return frame
+}
+
+/** Posts a vsembed PLAYER_EVENT for a 1000-second episode, as its player does. */
+export async function sendProviderEvent(
+  page: Page,
+  status: 'playing' | 'paused' | 'seeked',
+  progress: number,
+  episode: { season: number; episode: number } = { season: 1, episode: 15 },
+) {
+  await vsembedFrame(page).evaluate(({ status, progress, episode }) => {
+    parent.postMessage({
+      type: 'PLAYER_EVENT',
+      data: {
+        player_info: { tmdb: '10', mediaType: 'tv', ...episode },
+        player_status: status,
+        player_progress: progress,
+        player_duration: 1000,
+      },
+    }, '*')
+  }, { status, progress, episode })
+}
+
+/** The messages the app has sent the Source 1 player. */
+export function providerCommands(page: Page) {
+  return vsembedFrame(page).evaluate(() => (window as typeof window & { __commands: unknown[] }).__commands)
+}
+
 /** Records an unfinished episode in the account's history and opens the show there. */
-export async function openShowResumingAt(page: Page, seasonNumber: number, episodeNumber: number) {
+export async function openShowResumingAt(
+  page: Page,
+  seasonNumber: number,
+  episodeNumber: number,
+  saved: { position: number; duration: number } | null = null,
+) {
   const now = Date.now()
-  watchServer.entries.set(`tv:10:${seasonNumber}:${episodeNumber}`, { watched: false, watchSeconds: 600, updatedAt: now })
+  watchServer.entries.set(`tv:10:${seasonNumber}:${episodeNumber}`, { watched: false, watchSeconds: 600, updatedAt: now, ...saved })
   watchServer.titles.set('tv:10', {
     mediaType: 'tv',
     id: 10,

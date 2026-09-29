@@ -7,11 +7,11 @@ interface NextEpisodePromptProps {
   onDismiss: () => void
 }
 
-// Floats above the provider's control bar once an episode is finished; on
-// phones the player is short, so it sits in the top corner instead.
+// Floats in the middle of the player once an episode is finished, which in
+// theater mode is the middle of the screen.
 export function NextEpisodePrompt({ label, episodeName, onWatch, onDismiss }: NextEpisodePromptProps) {
   return (
-    <div className="absolute right-3 top-3 z-20 sm:bottom-16 sm:right-4 sm:top-auto flex max-w-[calc(100%-2rem)] items-center gap-1 rounded-full bg-black/80 p-1 shadow-2xl ring-1 ring-white/15 backdrop-blur">
+    <div className="absolute inset-x-0 top-1/2 z-20 mx-auto flex w-fit max-w-[calc(100%-2rem)] -translate-y-1/2 items-center gap-1 rounded-full bg-black/80 p-1 shadow-2xl ring-1 ring-white/15 backdrop-blur">
       <button
         type="button"
         onClick={onWatch}

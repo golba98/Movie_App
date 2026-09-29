@@ -131,11 +131,15 @@ function ProviderFrame({ iframeRef, iframeKey, src, loaded, title, sourceLabel, 
   )
 }
 
-// Freezes the start offset per player load, so saving progress never reloads the iframe.
+// Freezes the start offset per player load, so saving progress never reloads the
+// iframe. Forgotten once the frame is gone, so playing again starts from the
+// latest saved position rather than the one this frame opened at.
 function useFrozenSrc(iframeKey: string | null, url: string | null, withStart: (url: string) => string) {
   const [frozen, setFrozen] = useState<{ key: string; src: string } | null>(null)
   if (iframeKey && url && frozen?.key !== iframeKey) {
     setFrozen({ key: iframeKey, src: withStart(url) })
+  } else if (!iframeKey && frozen) {
+    setFrozen(null)
   }
   return frozen?.key === iframeKey ? frozen.src : url
 }
