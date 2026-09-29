@@ -49,6 +49,10 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
 
   useEffect(() => {
     setSelectedSourceId(null)
+    // Cleared now as well: when playback carries on into the next episode, the
+    // extraction effect below runs in this same commit and must not mistake
+    // the previous episode's player for this one's.
+    sourceStatesRef.current = {}
     setSourceStates({})
     setLoadedIframeKey(null)
     setPlayerReload(0)
