@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mockApi } from './support/mock-api'
+import { mockApi, watchServer } from './support/mock-api'
 import { fallbackSources, mockTwoSourcePlayer } from './support/player'
 
 test.beforeEach(async ({ page }) => {
@@ -511,4 +511,68 @@ test('@mobile HLS resolution loads the playlist through the native video player'
   } finally {
     releasePlaylist?.()
   }
+})
+
+test('the episode list opens scrolled to and highlighting the episode being resumed', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const episodes = Array.from({ length: 20 }, (_, index) => ({
+    id: 2000 + index,
+    name: `Episode title ${index + 1}`,
+    overview: 'An episode of the long running season.',
+    episode_number: index + 1,
+    season_number: 1,
+    still_path: null,
+    air_date: '2015-12-14',
+  }))
+  await page.route('**/api/tmdb/tv/10/season/1?*', async (route) => {
+    await route.fulfill({ json: { id: 101, season_number: 1, episodes } })
+  })
+  await page.route('**/api/media-sources/tv/10', async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          sources: [{
+            id: 'flixbaba-default',
+            mediaType: 'tv',
+            tmdbId: 10,
+            seasonNumber: null,
+            episodeNumber: null,
+            label: 'Flixbaba Stream (Dynamic)',
+            sourceUrl: 'https://flixbaba.mov/tv/10/the-expanse',
+            mimeType: 'video/mp4',
+            rightsBasis: 'licensed',
+            isDynamic: true,
+          }],
+        },
+      },
+    })
+  })
+  const now = Date.now()
+  watchServer.entries.set('tv:10:1:15', { watched: false, watchSeconds: 600, updatedAt: now })
+  watchServer.titles.set('tv:10', {
+    mediaType: 'tv',
+    id: 10,
+    seasonNumber: 1,
+    episodeNumber: 15,
+    item: { id: 10, mediaType: 'tv', title: 'The Expanse', overview: '', posterPath: '/expanse.jpg', backdropPath: null, voteAverage: 8.1, date: null, year: null },
+    updatedAt: now,
+  })
+
+  await page.goto('/')
+  await expect(page.locator('#continue-watching').locator('article', { hasText: 'The Expanse' })).toBeVisible()
+  await page.goto('/tv/10')
+
+  const player = page.locator('#streaming-player')
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E15' })).toBeVisible()
+  const current = player.getByRole('button', { name: /Episode title 15\b/ })
+  await expect(current).toHaveAttribute('aria-pressed', 'true')
+  await expect(player.getByRole('button', { name: /Episode title 1\b/ })).toHaveAttribute('aria-pressed', 'false')
+
+  // Only the list scrolls: the current episode sits inside its visible area.
+  const list = page.getByTestId('episode-list')
+  await expect.poll(async () => {
+    const [listBox, itemBox] = await Promise.all([list.boundingBox(), current.boundingBox()])
+    return Boolean(listBox && itemBox && itemBox.y >= listBox.y && itemBox.y + itemBox.height <= listBox.y + listBox.height)
+  }).toBe(true)
+  expect(await page.getByRole('heading', { name: 'The Expanse', exact: true }).evaluate((heading) => heading.closest('[data-lenis-prevent]')?.scrollTop)).toBe(0)
 })

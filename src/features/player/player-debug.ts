@@ -14,10 +14,23 @@ export function urlHost(url: string | null | undefined) {
   }
 }
 
-/** Development-only player diagnostics. Callers must pass non-sensitive details only. */
+// Lets a viewer turn the logs on in production to report a playback problem:
+// localStorage.setItem('fedora:player-debug', '1'), then reload.
+const DEBUG_FLAG = 'fedora:player-debug'
+
+function debugEnabled() {
+  if (import.meta.env.DEV) return true
+  try {
+    return localStorage.getItem(DEBUG_FLAG) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Player diagnostics, on in development or behind a flag. Callers must pass non-sensitive details only. */
 export function playerDebug(event: string, details?: Record<string, unknown>) {
-  if (!import.meta.env.DEV) return
-  console.info(`[player] ${event}`, details ?? {})
+  if (!debugEnabled()) return
+  console.info(`[player] ${new Date().toISOString().slice(11, 19)} ${event}`, details ?? {})
 }
 
 export function logIframeConfiguration(context: string) {
