@@ -194,3 +194,27 @@ test('closing and reopening does not briefly show the previous modal content', a
   // Background scroll stays locked while open, and is released after closing.
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('hidden')
 })
+
+test('closing a title opened from another title shows the first again, then frees the page', async ({ page }) => {
+  await mock(page, 0)
+  await page.goto('/')
+  await page.getByRole('link', { name: 'View details for Dune: Part Two' }).first().click()
+  const panel = page.locator('div.fixed.inset-0.z-\\[60\\] > div.max-w-5xl')
+  const heading = (name: string) => page.getByRole('article').getByRole('heading', { level: 1, name })
+  await expect(heading('Dune: Part Two')).toBeVisible()
+
+  // A poster in the Similar row opens the next title over this one.
+  await page.getByRole('link', { name: 'View details for Arrival' }).last().click()
+  await expect(heading('Arrival')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Close details' }).click()
+  await expect(heading('Dune: Part Two')).toBeVisible()
+  await expect(panel).toHaveCSS('opacity', '1')
+
+  await page.getByRole('button', { name: 'Close details' }).click()
+  await expect(panel).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('')
+  await page.mouse.move(640, 360)
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+})

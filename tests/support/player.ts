@@ -110,6 +110,7 @@ export async function mockDynamicShow(page: Page, embedUrl: EmbedUrl = exampleEm
       season_number: seasonNumber,
       still_path: null,
       air_date: '2015-12-14',
+      runtime: 17,
     }))
     await route.fulfill({ json: { id: 100 + seasonNumber, season_number: seasonNumber, episodes } })
   })
@@ -207,7 +208,7 @@ export async function openShowResumingAt(
   page: Page,
   seasonNumber: number,
   episodeNumber: number,
-  saved: { position: number; duration: number } | null = null,
+  saved: { position?: number; duration?: number; watchSeconds?: number } | null = null,
 ) {
   const now = Date.now()
   watchServer.entries.set(`tv:10:${seasonNumber}:${episodeNumber}`, { watched: false, watchSeconds: 600, updatedAt: now, ...saved })

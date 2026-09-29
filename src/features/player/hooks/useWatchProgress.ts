@@ -31,6 +31,8 @@ interface WatchProgressOptions {
  * finished once watch time covers WATCHED_THRESHOLD of its runtime. A player
  * that reports its own position is trusted over watch time for resuming and
  * finishing, except while it has restarted on its own (see useRestartRecovery).
+ * Once a title's player has reported, watch time never finishes it: that count
+ * includes paused time and replays, and the player may not have reported yet.
  */
 export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMinutes, active, iframeRef }: WatchProgressOptions) {
   const { mediaType, id } = media
@@ -47,6 +49,8 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
 
   const entry = getEntry(mediaType, id, seasonNumber, episodeNumber)
   const hasEntry = entry !== null
+  // Its player has reported a position before, so only a position finishes it.
+  const playerReports = entry?.duration != null
   const runtimeSeconds = runtimeMinutes && runtimeMinutes > 0 ? runtimeMinutes * 60 : 0
   const sessionKey = `${mediaType}:${id}:${seasonNumber}:${episodeNumber}`
 
@@ -68,10 +72,10 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
       watchSeconds,
       position: reported?.position,
       duration: reported?.duration,
-      finished: !reported && runtimeSeconds > 0 && watchSeconds >= runtimeSeconds * WATCHED_THRESHOLD,
+      finished: !reported && !playerReports && runtimeSeconds > 0 && watchSeconds >= runtimeSeconds * WATCHED_THRESHOLD,
       urgent,
     })
-  }, [episodeNumber, hasEntry, media, recordWatch, runtimeSeconds, seasonNumber])
+  }, [episodeNumber, hasEntry, media, playerReports, recordWatch, runtimeSeconds, seasonNumber])
 
   const readWatchSeconds = usePlaybackWatcher({
     active,

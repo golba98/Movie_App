@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react'
+import { lockPageScroll } from '../lib/scroll-lock'
 
 /**
  * Opens a native <dialog> as a modal while `open` is set: locks page scroll,
@@ -16,13 +17,12 @@ export function useModalDialog(
     if (!dialog) return
 
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const unlockScroll = lockPageScroll()
     dialog.showModal()
     initialFocusRef.current?.focus()
 
     return () => {
-      document.body.style.overflow = previousOverflow
+      unlockScroll()
       if (dialog.open) dialog.close()
       window.requestAnimationFrame(() => {
         if (previousFocus?.isConnected) previousFocus.focus()

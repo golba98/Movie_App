@@ -8,6 +8,7 @@ import {
   openShowResumingAt,
   providerCommands,
   sendProviderEvent,
+  watchFor,
 } from './support/player'
 
 test.beforeEach(async ({ page }) => {
@@ -631,8 +632,7 @@ test('Source 1 progress messages mark the final episode of a season watched and 
   await expect(lastEpisode.getByRole('button', { name: 'Mark as unwatched' })).toBeVisible()
 })
 
-test('Source 1 resumes an unfinished episode at its saved position', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 })
+test('@mobile Source 1 resumes an unfinished episode at its saved position', async ({ page }) => {
   await mockVsembedShow(page)
   await openShowResumingAt(page, 1, 15, { position: 400, duration: 1000 })
 
@@ -643,8 +643,7 @@ test('Source 1 resumes an unfinished episode at its saved position', async ({ pa
 
 // Source 1 falls over to another stream host mid-episode and that host starts
 // at 0:00; the app sends it back to where the viewer was.
-test('a provider restart mid-episode is sent back to where the viewer was and never overwrites progress', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 })
+test('@mobile a provider restart mid-episode is sent back to where the viewer was and never overwrites progress', async ({ page }) => {
   await mockVsembedShow(page)
   await openShowResumingAt(page, 1, 15)
 
@@ -662,8 +661,7 @@ test('a provider restart mid-episode is sent back to where the viewer was and ne
   await expect(iframe).toHaveAttribute('src', /[?&]startAt=600$/)
 })
 
-test('a viewer seeking back in the provider player is not undone', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 })
+test('@mobile a viewer seeking back in the provider player is not undone', async ({ page }) => {
   await mockVsembedShow(page)
   await openShowResumingAt(page, 1, 15)
 
@@ -683,8 +681,7 @@ test('a viewer seeking back in the provider player is not undone', async ({ page
   await expect(iframe).toHaveAttribute('src', /[?&]startAt=30$/)
 })
 
-test('an episode picked inside the provider player is neither recorded nor treated as a restart', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 })
+test('@mobile an episode picked inside the provider player is neither recorded nor treated as a restart', async ({ page }) => {
   await mockVsembedShow(page)
   await openShowResumingAt(page, 1, 15)
 
@@ -702,8 +699,7 @@ test('an episode picked inside the provider player is neither recorded nor treat
   await expect(iframe).toHaveAttribute('src', /[?&]startAt=600$/)
 })
 
-test('leaving theater mode keeps the provider player running inline', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 })
+test('@mobile leaving theater mode keeps the provider player running inline', async ({ page }) => {
   await mockDynamicShow(page)
   await openShowResumingAt(page, 1, 15)
 
@@ -722,7 +718,7 @@ test('leaving theater mode keeps the provider player running inline', async ({ p
   await expect(player.getByRole('button', { name: 'Stop player' })).toBeVisible()
 })
 
-test('@mobile the Watch next prompt sits in the centre of the player, inline and in theater mode', async ({ page }) => {
+test('@mobile the Watch next prompt sits on the right, clear of the subtitles and the player buttons', async ({ page }) => {
   const reported = await mockDynamicShow(page)
   reported.time = 950
   await openShowResumingAt(page, 1, 15)
@@ -730,23 +726,59 @@ test('@mobile the Watch next prompt sits in the centre of the player, inline and
   const player = page.locator('#streaming-player')
   const shell = page.getByTestId('player-shell')
   const prompt = player.getByRole('button', { name: /^Watch next/ }).locator('..')
-  const centre = async (locator: typeof shell) => {
-    const box = await locator.boundingBox()
-    expect(box).not.toBeNull()
-    return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }
-  }
-  const expectCentred = async () => {
-    const [promptCentre, shellCentre] = await Promise.all([centre(prompt), centre(shell)])
-    expect(Math.abs(promptCentre.x - shellCentre.x)).toBeLessThanOrEqual(2)
-    expect(Math.abs(promptCentre.y - shellCentre.y)).toBeLessThanOrEqual(2)
+  // Right-aligned and in the upper half, above the provider's subtitles and controls.
+  const expectClearOfSubtitles = async () => {
+    const [promptBox, shellBox] = await Promise.all([prompt.boundingBox(), shell.boundingBox()])
+    expect(promptBox).not.toBeNull()
+    expect(shellBox).not.toBeNull()
+    expect(shellBox!.x + shellBox!.width - (promptBox!.x + promptBox!.width)).toBeLessThanOrEqual(24)
+    expect(promptBox!.y + promptBox!.height - shellBox!.y).toBeLessThanOrEqual(shellBox!.height / 2)
   }
 
   await player.getByRole('button', { name: 'Play episode' }).click()
   await expect(prompt).toBeVisible()
-  await prompt.scrollIntoViewIfNeeded()
-  await expectCentred()
+  await expectClearOfSubtitles()
 
   await player.getByRole('button', { name: 'Theater mode' }).click()
   await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
-  await expectCentred()
+  await expectClearOfSubtitles()
+  const promptBox = (await prompt.boundingBox())!
+  for (const name of ['Exit theater mode', 'Reload player']) {
+    const box = (await page.getByRole('button', { name }).boundingBox())!
+    const overlaps = promptBox.x < box.x + box.width && box.x < promptBox.x + promptBox.width
+      && promptBox.y < box.y + box.height && box.y < promptBox.y + promptBox.height
+    expect(overlaps, `Watch next overlaps ${name}`).toBe(false)
+  }
+})
+
+test('going Back while theater mode is open leaves the page scrollable', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('link', { name: 'View details for Dune: Part Two' }).first().click()
+  await page.getByRole('button', { name: 'Watch Movie' }).click()
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+
+  await page.goBack()
+  await expect(page.getByRole('button', { name: 'Close details' })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('')
+  await page.mouse.move(640, 360)
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+})
+
+// Watch time also counts paused time and replays, so a player that reports its
+// own position must not be finished by watch time before it reports.
+test('an episode whose player has reported before is not finished by watch time alone', async ({ page }) => {
+  await mockVsembedShow(page)
+  await page.clock.install()
+  await openShowResumingAt(page, 1, 15, { position: 100, duration: 1000, watchSeconds: 950 })
+
+  const player = page.locator('#streaming-player')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.locator('iframe')).toHaveClass(/opacity-100/)
+  // Source 1 is still showing its own Play button, so it hasn't reported yet.
+  await watchFor(page, 15_000)
+  await page.waitForTimeout(500)
+
+  await expect(player.locator('[data-episode="15"]').getByRole('button', { name: 'Mark as watched' })).toBeVisible()
+  await expect(player.getByRole('button', { name: /^Watch next/ })).toHaveCount(0)
 })

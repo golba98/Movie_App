@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react'
+import { lockPageScroll } from '../../../lib/scroll-lock'
 
 /**
  * While theater mode is open: locks page scroll, closes on Escape, moves
@@ -15,12 +16,11 @@ export function useTheaterMode(
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const unlockScroll = lockPageScroll()
     window.addEventListener('keydown', onKeyDown)
     exitButtonRef.current?.focus()
     return () => {
-      document.body.style.overflow = previousOverflow
+      unlockScroll()
       window.removeEventListener('keydown', onKeyDown)
       if (returnFocus?.isConnected) returnFocus.focus()
     }
