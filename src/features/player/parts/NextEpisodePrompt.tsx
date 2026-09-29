@@ -3,15 +3,18 @@ import { Play, X } from 'lucide-react'
 interface NextEpisodePromptProps {
   label: string
   episodeName?: string
+  // Theater mode puts the exit and reload buttons in the player's top-right corner.
+  theater: boolean
   onWatch: () => void
   onDismiss: () => void
 }
 
-// Floats in the middle of the player once an episode is finished, which in
-// theater mode is the middle of the screen.
-export function NextEpisodePrompt({ label, episodeName, onWatch, onDismiss }: NextEpisodePromptProps) {
+// Floats on the right once an episode is finished, above the provider's
+// subtitles and controls. Phones show a short player, so it sits in the top
+// corner there, below the theater buttons in theater mode.
+export function NextEpisodePrompt({ label, episodeName, theater, onWatch, onDismiss }: NextEpisodePromptProps) {
   return (
-    <div className="absolute inset-x-0 top-1/2 z-20 mx-auto flex w-fit max-w-[calc(100%-2rem)] -translate-y-1/2 items-center gap-1 rounded-full bg-black/80 p-1 shadow-2xl ring-1 ring-white/15 backdrop-blur">
+    <div className={`absolute right-3 z-20 sm:right-4 sm:top-1/4 ${theater ? 'top-[4.5rem]' : 'top-3'} flex max-w-[calc(100%-2rem)] items-center gap-1 rounded-full bg-black/80 p-1 shadow-2xl ring-1 ring-white/15 backdrop-blur`}>
       <button
         type="button"
         onClick={onWatch}

@@ -223,6 +223,7 @@ export function StreamingPlayer({
               <NextEpisodePrompt
                 label={nextLabel}
                 episodeName={nextName}
+                theater={theaterMode}
                 onWatch={() => watchNext(true)}
                 onDismiss={() => setDismissedPromptKey(resetKey)}
               />
