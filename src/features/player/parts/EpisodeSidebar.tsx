@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Play } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { imageUrl } from '../../../lib/images'
 import type { EpisodeListing } from '../sources'
 
@@ -62,6 +62,7 @@ function EpisodeItem({
 
   return (
     <div
+      data-episode={episodeNumber}
       className={`flex w-full items-start gap-1 rounded-2xl border p-2 text-left transition ${
         selected
           ? 'border-white/20 bg-white/10 text-white'
@@ -112,7 +113,7 @@ interface EpisodeSidebarProps {
   seasons: number[]
   activeSeason: number
   listings: EpisodeListing[]
-  activeSourceId: string
+  activeEpisode: number
   loading: boolean
   error: string | null
   isWatched: (episodeNumber: number) => boolean
@@ -126,7 +127,7 @@ export function EpisodeSidebar({
   seasons,
   activeSeason,
   listings,
-  activeSourceId,
+  activeEpisode,
   loading,
   error,
   isWatched,
@@ -135,6 +136,20 @@ export function EpisodeSidebar({
   onToggleWatched,
 }: EpisodeSidebarProps) {
   const watchedCount = listings.filter(({ episodeNumber }) => isWatched(episodeNumber)).length
+  const listRef = useRef<HTMLDivElement>(null)
+  const hasActiveListing = listings.some(({ episodeNumber }) => episodeNumber === activeEpisode)
+
+  // Brings the current episode into view once its season's list is shown.
+  // Scrolls the list itself, never the page, and only when the episode or
+  // season changes, so it doesn't fight a viewer browsing the list.
+  useEffect(() => {
+    const list = listRef.current
+    if (!list || loading || !hasActiveListing) return
+    const item = list.querySelector<HTMLElement>(`[data-episode="${activeEpisode}"]`)
+    if (!item) return
+    const offset = item.getBoundingClientRect().top - list.getBoundingClientRect().top
+    list.scrollTop += offset - 8
+  }, [activeSeason, activeEpisode, loading, hasActiveListing])
 
   return (
     <aside className="flex flex-col rounded-3xl border border-white/7 bg-white/[0.025] p-4" aria-labelledby="episodes-heading">
@@ -159,14 +174,14 @@ export function EpisodeSidebar({
         <SeasonPicker seasons={seasons} activeSeason={activeSeason} onSelect={onSelectSeason} />
       </div>
 
-      <div data-lenis-prevent className="max-h-[500px] flex-1 space-y-2 overflow-y-auto pr-1 scrollbar-subtle">
+      <div ref={listRef} data-testid="episode-list" data-lenis-prevent className="max-h-[500px] flex-1 space-y-2 overflow-y-auto pr-1 scrollbar-subtle">
         {loading && <p role="status" className="py-6 text-center text-xs text-zinc-500">Loading episode details…</p>}
         {error && <p className="rounded-xl bg-amber-300/5 px-3 py-2 text-xs text-amber-100">{error}</p>}
         {listings.map((listing) => (
           <EpisodeItem
             key={listing.source.id}
             listing={listing}
-            selected={listing.source.id === activeSourceId}
+            selected={listing.episodeNumber === activeEpisode}
             watched={isWatched(listing.episodeNumber)}
             onSelect={() => onSelectEpisode(listing.episodeNumber)}
             onToggleWatched={() => onToggleWatched(listing.episodeNumber)}

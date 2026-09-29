@@ -237,7 +237,7 @@ export function StreamingPlayer({
             seasons={selection.availableSeasons}
             activeSeason={season}
             listings={listings}
-            activeSourceId={activeSource.id}
+            activeEpisode={episode}
             loading={selection.loadingEpisodes}
             error={selection.episodesError}
             isWatched={(episodeNumber) => isEpisodeWatched(id, season, episodeNumber)}

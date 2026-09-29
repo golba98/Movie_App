@@ -1,6 +1,6 @@
 import { AlertCircle, Play } from 'lucide-react'
-import { useState, type RefObject } from 'react'
-import { PLAYER_IFRAME_ALLOW, PLAYER_IFRAME_REFERRER_POLICY } from '../player-debug'
+import { useEffect, useRef, useState, type RefObject } from 'react'
+import { PLAYER_IFRAME_ALLOW, PLAYER_IFRAME_REFERRER_POLICY, playerDebug, urlHost } from '../player-debug'
 
 const PANEL = 'grid size-full place-items-center bg-black px-5 py-8 text-center sm:px-6'
 const PRIMARY_BUTTON = 'min-h-11 w-full rounded-xl sm:w-auto bg-white px-5 text-sm font-black text-black transition hover:bg-zinc-200'
@@ -80,6 +80,34 @@ interface ProviderFrameProps {
 }
 
 function ProviderFrame({ iframeRef, iframeKey, src, loaded, title, sourceLabel, onLoad }: ProviderFrameProps) {
+  // A second load for the same frame means the provider navigated or reloaded
+  // its own player; a remount means this app replaced the frame.
+  const loadCountRef = useRef(0)
+  const host = urlHost(src)
+
+  useEffect(() => {
+    loadCountRef.current = 0
+    playerDebug('frame mounted', { sourceLabel, host })
+    return () => playerDebug('frame unmounted', { sourceLabel, host })
+  }, [iframeKey, sourceLabel, host])
+
+  const srcRef = useRef(src)
+  useEffect(() => {
+    if (srcRef.current === src) return
+    srcRef.current = src
+    playerDebug('frame src changed by app', { sourceLabel, host })
+  }, [src, sourceLabel, host])
+
+  const handleLoad = () => {
+    loadCountRef.current += 1
+    playerDebug(loadCountRef.current === 1 ? 'frame loaded' : 'frame reloaded by provider', {
+      sourceLabel,
+      host,
+      loads: loadCountRef.current,
+    })
+    onLoad()
+  }
+
   return (
     <div className="relative size-full bg-black">
       {/* No sandbox: providers refuse to run in sandboxed frames. See player-debug.ts. */}
@@ -92,7 +120,7 @@ function ProviderFrame({ iframeRef, iframeKey, src, loaded, title, sourceLabel, 
         allowFullScreen
         referrerPolicy={PLAYER_IFRAME_REFERRER_POLICY}
         aria-label={`Video player for ${title}`}
-        onLoad={onLoad}
+        onLoad={handleLoad}
       />
       {!loaded && (
         <div role="status" className="absolute inset-0 z-10 grid place-items-center bg-black px-6 text-center">
