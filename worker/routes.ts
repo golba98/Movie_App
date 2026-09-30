@@ -25,6 +25,7 @@ import {
   listSearchProvidersForAdmin,
   updateSearchProvider,
 } from './catalog/search-providers'
+import { serveSubtitle } from './catalog/subtitles'
 import { proxyTmdb } from './catalog/tmdb'
 import { ensureTesterAccount } from './dev-seed'
 import { assertSameOrigin, methodNotAllowed, notFound } from './http'
@@ -99,6 +100,8 @@ const routes: Route[] = [
 
   // Playback sources
   { path: '/api/media-sources/extract', methods: { GET: extractStreamEndpoint } },
+  // Public: Source 1's frame fetches the subtitle it was handed cross-origin, without cookies.
+  { path: pattern('/api/subtitles/([0-9a-f-]{36})\\.vtt'), methods: { GET: (_request, env, [id]) => serveSubtitle(env, id) } },
 
   // Watch party
   { path: '/api/watch-party/rooms', methods: { POST: createWatchParty } },

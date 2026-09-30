@@ -7,6 +7,7 @@ import { assertNoFieldErrors, positiveInteger, rethrowUniqueViolation, trimmedSt
 import { probeEmbedPolicy } from './embed-policy'
 import { activeSearchProviders, dynamicSourcesFor } from './search-providers'
 import { classifyPlaybackKind, resolvePlayerUrl } from './stream-resolver'
+import { withSubtitle } from './subtitles'
 import { fetchTmdbTitle } from './tmdb'
 
 const MAX_ADMIN_RESULTS = 200
@@ -286,6 +287,7 @@ export async function deleteMediaSource(request: Request, env: Env, id: string) 
 /**
  * Resolves a dynamic source's page to its player, and reports whether that
  * player refuses to be framed here so the client can offer another source.
+ * A Source 1 player comes back with a checked English subtitle attached.
  */
 export async function extractStreamEndpoint(request: Request, env: Env) {
   await requireUser(request, env.DB)
@@ -299,6 +301,9 @@ export async function extractStreamEndpoint(request: Request, env: Env) {
   const refresh = url.searchParams.get('refresh') === '1'
   const extractedUrl = await resolvePlayerUrl(env.DB, cleanedUrl, refresh)
   const playbackKind = extractedUrl ? classifyPlaybackKind(extractedUrl) : null
-  const embedBlocked = extractedUrl && playbackKind === 'embed' ? await probeEmbedPolicy(extractedUrl, url.origin, refresh) : null
-  return json({ extractedUrl, embedBlocked, playbackKind })
+  const [embedBlocked, playerUrl] = await Promise.all([
+    extractedUrl && playbackKind === 'embed' ? probeEmbedPolicy(extractedUrl, url.origin, refresh) : null,
+    extractedUrl ? withSubtitle(env, extractedUrl, url.origin) : null,
+  ])
+  return json({ extractedUrl: playerUrl, embedBlocked, playbackKind })
 }
