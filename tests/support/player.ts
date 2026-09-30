@@ -1,4 +1,5 @@
 import { expect, type Page, type Route } from '@playwright/test'
+import type { MediaSource } from '../../src/types/media-source'
 import { movie, detailsExtras } from './fixtures'
 import { watchServer } from './mock-api'
 
@@ -98,7 +99,7 @@ const exampleEmbedUrl: EmbedUrl = (season, episode) => `https://player.example.t
  * whose embed reports `reported.time` of a 1000-second episode when it loads,
  * in the message shape `reported.format` uses.
  */
-export async function mockDynamicShow(page: Page, embedUrl: EmbedUrl = exampleEmbedUrl) {
+export async function mockDynamicShow(page: Page, embedUrl: EmbedUrl = exampleEmbedUrl, additionalSources: MediaSource[] = []) {
   const reported: { time: number; format: 'timeupdate' | 'vsembed' } = { time: 100, format: 'timeupdate' }
   await page.route('**/api/tmdb/tv/10/season/*', async (route) => {
     const seasonNumber = Number(new URL(route.request().url()).pathname.split('/').pop())
@@ -129,7 +130,7 @@ export async function mockDynamicShow(page: Page, embedUrl: EmbedUrl = exampleEm
             mimeType: 'video/mp4',
             rightsBasis: 'licensed',
             isDynamic: true,
-          }],
+          }, ...additionalSources],
         },
       },
     })
@@ -163,10 +164,10 @@ export const SOURCE_ONE_SUBTITLE = 'sub_url=https%3A%2F%2Ffedora.test%2Fapi%2Fsu
  * records every message the app sends it in `window.__commands`; tests post
  * the provider's own events from inside it with `sendProviderEvent`.
  */
-export async function mockVsembedShow(page: Page, { subtitle = false } = {}) {
+export async function mockVsembedShow(page: Page, { subtitle = false, additionalSources = [] }: { subtitle?: boolean; additionalSources?: MediaSource[] } = {}) {
   await mockDynamicShow(page, (season, episode) => (
     `https://vsembed.ru/embed/tv?tmdb=10&season=${season}&episode=${episode}${subtitle ? `&${SOURCE_ONE_SUBTITLE}` : ''}`
-  ))
+  ), additionalSources)
   await page.route('https://vsembed.ru/**', (route) => route.fulfill({
     status: 200,
     contentType: 'text/html',
@@ -188,7 +189,7 @@ export async function sendProviderEvent(
   page: Page,
   status: 'playing' | 'paused' | 'seeked' | 'completed',
   progress: number,
-  episode: { season: number; episode: number } = { season: 1, episode: 15 },
+  episode: { season: number | string; episode: number | string; tmdb?: string; mediaType?: string } = { season: 1, episode: 15 },
 ) {
   await vsembedFrame(page).evaluate(({ status, progress, episode }) => {
     parent.postMessage({

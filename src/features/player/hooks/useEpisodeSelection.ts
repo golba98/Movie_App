@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { MediaSource } from '../../../types/media-source'
 import type { Episode, MediaType } from '../../../types/tmdb'
+import type { EpisodeRef } from '../../../types/watch-history'
 import { getTvSeasonDetails } from '../../catalog/api'
 import { useWatchedHistory } from '../../watch-history/watch-history-context'
 import { resolveStartEpisode } from '../episodes'
+
+const EMPTY_EPISODES: Episode[] = []
 
 /**
  * The season and episode a TV player shows, plus that season's TMDB episode
@@ -25,12 +28,18 @@ export function useEpisodeSelection(
     return resolveStartEpisode(sources, target, targetWatched)
   }
 
-  const [initialStart] = useState(startEpisode)
-  const [season, setSeason] = useState(initialStart.seasonNumber)
-  const [episode, setEpisode] = useState(initialStart.episodeNumber)
-  const [episodes, setEpisodes] = useState<Episode[]>([])
-  const [loadingEpisodes, setLoadingEpisodes] = useState(mediaType === 'tv')
-  const [episodesError, setEpisodesError] = useState<string | null>(null)
+  const [selection, setSelection] = useState(() => ({
+    ...startEpisode(),
+    requestVersion: 0,
+    providerReported: false,
+  }))
+  const { seasonNumber: season, episodeNumber: episode, requestVersion, providerReported } = selection
+  const metadataKey = `${id}:${season}`
+  const [metadata, setMetadata] = useState<{ key: string; episodes: Episode[]; error: string | null } | null>(null)
+  const currentMetadata = metadata?.key === metadataKey ? metadata : null
+  const episodes = currentMetadata?.episodes ?? EMPTY_EPISODES
+  const loadingEpisodes = mediaType === 'tv' && currentMetadata === null
+  const episodesError = currentMetadata?.error ?? null
 
   const availableSeasons = useMemo(() => {
     if (numberOfSeasons && sources.some((source) => source.isDynamic)) {
@@ -42,55 +51,77 @@ export function useEpisodeSelection(
   // A different show starts from its own resume point.
   useEffect(() => {
     if (mediaType !== 'tv') return
-    const start = startEpisode()
-    setSeason(start.seasonNumber)
-    setEpisode(start.episodeNumber)
+    setSelection({ ...startEpisode(), requestVersion: 0, providerReported: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   useEffect(() => {
     if (mediaType !== 'tv') return
     const controller = new AbortController()
-    setLoadingEpisodes(true)
-    setEpisodesError(null)
     getTvSeasonDetails(id, season, controller.signal)
       .then((data) => {
-        setEpisodes(data.episodes ?? [])
-        setLoadingEpisodes(false)
+        if (controller.signal.aborted) return
+        setMetadata({ key: metadataKey, episodes: data.episodes ?? [], error: null })
       })
       .catch(() => {
         if (controller.signal.aborted) return
-        setEpisodes([])
-        setEpisodesError('Episode metadata is unavailable. Authorised episodes remain playable.')
-        setLoadingEpisodes(false)
+        setMetadata({
+          key: metadataKey,
+          episodes: [],
+          error: 'Episode metadata is unavailable. Authorised episodes remain playable.',
+        })
       })
     return () => controller.abort()
-  }, [season, id, mediaType])
+  }, [season, id, mediaType, metadataKey])
+
+  const requestEpisode = useCallback((target: EpisodeRef) => {
+    setSelection((current) => ({
+      ...target,
+      requestVersion: current.requestVersion + 1,
+      providerReported: false,
+    }))
+  }, [])
 
   // "Next episode" guesses can run past the end of a season: move on to the
   // next season, or settle on the final episode.
   useEffect(() => {
-    if (mediaType !== 'tv' || loadingEpisodes || episodes.length === 0 || episode <= episodes.length) return
+    // The provider names what is actually playing, even if TMDB's listing
+    // is incomplete or uses a different episode order. Only correct guesses.
+    if (mediaType !== 'tv' || providerReported || loadingEpisodes || episodes.length === 0) return
+    const lastEpisode = Math.max(...episodes.map((item) => item.episode_number))
+    if (episode <= lastEpisode) return
     const seasonIndex = availableSeasons.indexOf(season)
     if (seasonIndex !== -1 && seasonIndex < availableSeasons.length - 1) {
-      setSeason(availableSeasons[seasonIndex + 1])
-      setEpisode(1)
+      requestEpisode({ seasonNumber: availableSeasons[seasonIndex + 1], episodeNumber: 1 })
     } else {
-      setEpisode(episodes.length)
+      requestEpisode({ seasonNumber: season, episodeNumber: lastEpisode })
     }
-  }, [episodes, loadingEpisodes, season, episode, availableSeasons, mediaType])
+  }, [episodes, loadingEpisodes, season, episode, availableSeasons, mediaType, providerReported, requestEpisode])
 
   const selectSeason = (seasonNumber: number) => {
     const firstSource = sources.find((source) => source.seasonNumber === seasonNumber)
-    setSeason(seasonNumber)
-    setEpisode(firstSource?.episodeNumber ?? 1)
+    requestEpisode({ seasonNumber, episodeNumber: firstSource?.episodeNumber ?? 1 })
+  }
+
+  const adoptProviderEpisode = (target: EpisodeRef) => {
+    if (mediaType !== 'tv' || !sources.some((source) => source.isDynamic)) return false
+    if (!Number.isInteger(target.seasonNumber) || target.seasonNumber <= 0
+      || !Number.isInteger(target.episodeNumber) || target.episodeNumber <= 0) return false
+    if (availableSeasons.length > 0 && !availableSeasons.includes(target.seasonNumber)) return false
+    setSelection((current) => current.providerReported
+      && current.seasonNumber === target.seasonNumber && current.episodeNumber === target.episodeNumber
+      ? current
+      : { ...current, ...target, providerReported: true })
+    return true
   }
 
   return {
     season,
     episode,
     selectSeason,
-    selectEpisode: setEpisode,
+    selectEpisode: (episodeNumber: number) => requestEpisode({ seasonNumber: season, episodeNumber }),
+    adoptProviderEpisode,
+    requestVersion,
     availableSeasons,
     episodes,
     loadingEpisodes,

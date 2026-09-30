@@ -15,7 +15,7 @@ export type SourceFailureReason =
 // clobbers another one's progress or error.
 type SourcePlayerState =
   | { status: 'extracting' }
-  | { status: 'ready'; extractedUrl: string; playbackKind: PlaybackKind }
+  | { status: 'ready'; sourceUrl: string; extractedUrl: string; playbackKind: PlaybackKind }
   | { status: 'failed'; reason: SourceFailureReason; message: string }
 
 export type SourceStates = Record<string, SourcePlayerState>

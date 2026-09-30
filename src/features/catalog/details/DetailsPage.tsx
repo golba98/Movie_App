@@ -71,6 +71,10 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
   const [theaterMode, setTheaterMode] = useState(false)
   const [watchPartyOpen, setWatchPartyOpen] = useState(false)
   const [skeletonMounted, setSkeletonMounted] = useState(true)
+  const [currentEpisode, setCurrentEpisode] = useState<{ id: number; episode: EpisodeRef } | null>(null)
+  const onCurrentEpisodeChange = useCallback((episode: EpisodeRef | null) => {
+    setCurrentEpisode(episode ? { id, episode } : null)
+  }, [id])
   // Theater mode owns Escape while it is open, so the first press only exits
   // the player rather than also closing the details.
   const { visible, close } = useModalRouteTransition(theaterMode)
@@ -137,7 +141,9 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
     : null
   const playLabel = mediaType === 'movie'
     ? moviePlayLabel(Boolean(movieResume), movieResumePosition)
-    : tvPlayLabel(tvStartEpisode, resumeTargetWatched)
+    : currentEpisode?.id === id
+      ? tvPlayLabel(currentEpisode.episode, false)
+      : tvPlayLabel(tvStartEpisode, resumeTargetWatched)
   const canWatchTogether = watchPartyEnabled && Boolean(mediaSources?.length)
 
   return (
@@ -237,6 +243,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                 {mediaSources === null && <PlayerPlaceholder />}
                 {mediaSources && mediaSources.length > 0 && (
                   <StreamingPlayer
+                    key={`${mediaType}:${id}`}
                     id={id}
                     mediaType={mediaType}
                     title={item.title}
@@ -246,6 +253,7 @@ export function DetailsPage({ mediaType }: { mediaType: MediaType }) {
                     sources={mediaSources}
                     theaterMode={theaterMode}
                     onTheaterModeChange={setTheaterMode}
+                    onCurrentEpisodeChange={onCurrentEpisodeChange}
                   />
                 )}
                 <section aria-labelledby="cast-heading">

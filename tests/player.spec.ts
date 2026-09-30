@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { mockApi } from './support/mock-api'
+import { mockApi, watchServer } from './support/mock-api'
+import { tvSeasonOne } from './support/fixtures'
 import {
   fallbackSources,
   mockDynamicShow,
@@ -739,22 +740,243 @@ test('@mobile a viewer seeking back in the provider player is not undone', async
   await expect(iframe).toHaveAttribute('src', /[?&]startAt=30$/)
 })
 
-test('@mobile an episode picked inside the provider player is neither recorded nor treated as a restart', async ({ page }) => {
+test('@mobile provider episode changes synchronize labels and history without restarting playback', async ({ page }) => {
   await mockVsembedShow(page)
-  await openShowResumingAt(page, 1, 15)
+  await page.clock.install()
+  await openShowResumingAt(page, 1, 12)
 
   const player = page.locator('#streaming-player')
   const iframe = player.locator('iframe')
   await player.getByRole('button', { name: 'Play episode' }).click()
   await expect(iframe).toHaveClass(/opacity-100/)
-  await sendProviderEvent(page, 'playing', 600)
-  await sendProviderEvent(page, 'playing', 5, { season: 1, episode: 16 })
-  await page.waitForTimeout(2_500)
-  expect(await providerCommands(page)).toEqual([])
+  const originalSrc = await iframe.getAttribute('src')
+  await iframe.evaluate((element) => {
+    (window as typeof window & { __episodeFrame?: Element }).__episodeFrame = element
+  })
+  await sendProviderEvent(page, 'playing', 600, { season: 1, episode: 12 })
+  await sendProviderEvent(page, 'playing', 5, { season: '1', episode: '13' })
 
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E13' })).toBeVisible()
+  await expect(player.getByRole('button', { name: /Episode title 13\b/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(player.getByRole('button', { name: /Episode title 12\b/ })).toHaveAttribute('aria-pressed', 'false')
+  await expect(page.getByRole('button', { name: 'Resume S1 E13' })).toBeVisible()
+  await expect(iframe).toHaveAttribute('src', originalSrc!)
+  expect(await iframe.evaluate((element) => element === (window as typeof window & { __episodeFrame?: Element }).__episodeFrame)).toBe(true)
+  await watchFor(page, 15_000)
+  expect(await providerCommands(page)).toEqual([])
+  expect(watchServer.entries.has('tv:10:1:13')).toBe(false)
+
+  await watchFor(page, 5 * 60_000)
+  // Give this report a newer sync version than the last fake-clock tick.
+  await page.clock.fastForward(1000)
+  await sendProviderEvent(page, 'playing', 450, { season: 1, episode: 13 })
   await player.getByRole('button', { name: 'Stop player' }).click()
+  await expect.poll(() => watchServer.entries.get('tv:10:1:13')?.position).toBe(450)
+  expect(watchServer.entries.get('tv:10:1:12')?.position).toBe(600)
+  expect(watchServer.entries.get('tv:10:1:13')?.watched).toBe(false)
+
   await player.getByRole('button', { name: 'Play episode' }).click()
-  await expect(iframe).toHaveAttribute('src', /[?&]startAt=600$/)
+  await expect(iframe).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=13&startAt=450')
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await player.getByRole('button', { name: 'Stop player' }).click()
+  await page.reload()
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E13' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Resume S1 E13' })).toBeVisible()
+})
+
+test('@mobile provider auto-advance keeps theater playback running and uses the new episode for Watch next', async ({ page }) => {
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 12)
+  await page.getByRole('button', { name: 'Resume S1 E12' }).click()
+
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  await expect(iframe).toHaveClass(/opacity-100/)
+  const originalSrc = await iframe.getAttribute('src')
+  await sendProviderEvent(page, 'completed', 1000, { season: 1, episode: 12 })
+  await player.getByRole('button', { name: 'Dismiss next episode' }).click()
+  // This first report must reach the new tracking session, even without a
+  // second timeupdate. A dismissed prompt for E12 must not dismiss E13's.
+  await sendProviderEvent(page, 'completed', 1000, { season: 1, episode: 13 })
+  await expect(player.getByRole('button', { name: /^Watch next/ })).toHaveText('Watch next · S1 E14 — Episode title 14')
+  await expect(page.getByRole('button', { name: 'Exit theater mode' })).toBeVisible()
+  await expect(iframe).toHaveAttribute('src', originalSrc!)
+
+  await page.getByRole('button', { name: 'Exit theater mode' }).click()
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E13' })).toBeVisible()
+  await expect(player.getByRole('button', { name: /Episode title 13\b/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(player.getByText('Ready when you are')).toHaveCount(0)
+  await player.getByRole('button', { name: 'Reload player' }).click()
+  await expect(iframe).toHaveAttribute('src', /^https:\/\/vsembed\.ru\/embed\/tv\?tmdb=10&season=1&episode=13(?:&startAt=\d+)?$/)
+})
+
+test('provider season changes cannot be overwritten by the previous season metadata', async ({ page }) => {
+  await mockVsembedShow(page)
+  await page.route('**/api/tmdb/tv/10/season/1?*', (route) => route.fulfill({ json: tvSeasonOne }))
+  let releaseSeason: (() => void) | undefined
+  const seasonReady = new Promise<void>((resolve) => { releaseSeason = resolve })
+  await page.route('**/api/tmdb/tv/10/season/2?*', async (route) => {
+    await seasonReady
+    await route.fallback()
+  })
+  try {
+    await openShowResumingAt(page, 1, 2)
+    const player = page.locator('#streaming-player')
+    await player.getByRole('button', { name: 'Play episode' }).click()
+    await expect(player.locator('iframe')).toHaveClass(/opacity-100/)
+    const originalSrc = await player.locator('iframe').getAttribute('src')
+
+    await sendProviderEvent(page, 'playing', 5, { season: 2, episode: 13 })
+    await expect(player.getByRole('heading', { name: 'The Expanse — S2 E13' })).toBeVisible()
+    await expect(player.getByRole('status')).toHaveText('Loading episode details…')
+    await expect(player.getByRole('button', { name: 'Next episode' })).toHaveCount(0)
+    releaseSeason?.()
+    await expect(player.getByRole('button', { name: /Episode title 13\b/ })).toHaveAttribute('aria-pressed', 'true')
+    await expect(player.getByRole('heading', { name: 'The Expanse — S2 E13' })).toBeVisible()
+    await expect(player.getByRole('button', { name: 'Season 2' })).toBeVisible()
+    await expect(player.locator('iframe')).toHaveAttribute('src', originalSrc!)
+  } finally {
+    releaseSeason?.()
+  }
+})
+
+test('unavailable or incomplete metadata cannot change the provider episode', async ({ page }) => {
+  await mockVsembedShow(page)
+  await page.route('**/api/tmdb/tv/10/season/2?*', (route) => route.fulfill({ status: 503, json: {} }))
+  await page.route('**/api/tmdb/tv/10/season/3?*', (route) => route.fulfill({
+    json: { ...tvSeasonOne, season_number: 3, episodes: tvSeasonOne.episodes.map((episode) => ({ ...episode, season_number: 3 })) },
+  }))
+  await openShowResumingAt(page, 1, 12)
+  const player = page.locator('#streaming-player')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.locator('iframe')).toHaveClass(/opacity-100/)
+
+  await sendProviderEvent(page, 'playing', 5, { season: 2, episode: 13 })
+  await expect(player.getByText('Episode metadata is unavailable. Authorised episodes remain playable.')).toBeVisible()
+  await expect(player.getByRole('heading', { name: 'The Expanse — S2 E13' })).toBeVisible()
+
+  await sendProviderEvent(page, 'playing', 5, { season: 3, episode: 13 })
+  await expect(player.getByRole('button', { name: 'Dulcinea' })).toBeVisible()
+  await expect(player.getByRole('heading', { name: 'The Expanse — S3 E13' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Resume S3 E13' })).toBeVisible()
+})
+
+test('a matching provider report protects the resumed episode from delayed incomplete metadata', async ({ page }) => {
+  await mockVsembedShow(page)
+  let releaseSeason: (() => void) | undefined
+  const seasonReady = new Promise<void>((resolve) => { releaseSeason = resolve })
+  await page.route('**/api/tmdb/tv/10/season/1?*', async (route) => {
+    await seasonReady
+    await route.fulfill({ json: tvSeasonOne })
+  })
+  try {
+    await openShowResumingAt(page, 1, 13)
+    const player = page.locator('#streaming-player')
+    await player.getByRole('button', { name: 'Play episode' }).click()
+    await expect(player.locator('iframe')).toHaveClass(/opacity-100/)
+    await sendProviderEvent(page, 'playing', 600, { season: 1, episode: 13 })
+    releaseSeason?.()
+    await expect(player.getByRole('button', { name: 'Dulcinea' })).toBeVisible()
+    await expect(player.getByRole('heading', { name: 'The Expanse — S1 E13' })).toBeVisible()
+    await expect(player.locator('iframe')).toHaveAttribute('src', /[?&]episode=13(?:&|$)/)
+    await expect(player.getByText('Ready when you are')).toHaveCount(0)
+  } finally {
+    releaseSeason?.()
+  }
+})
+
+test('provider episode synchronization keeps its source and discards other episodes cached players', async ({ page }) => {
+  await mockVsembedShow(page, { additionalSources: [{
+    id: 'soap2day-default',
+    mediaType: 'tv',
+    tmdbId: 10,
+    seasonNumber: null,
+    episodeNumber: null,
+    label: 'Soap2Day Stream (Dynamic)',
+    sourceUrl: 'https://soap2day.test/tv/10/the-expanse',
+    mimeType: 'video/mp4',
+    rightsBasis: 'licensed',
+    isDynamic: true,
+  }, {
+    id: 'catalog-13',
+    mediaType: 'tv',
+    tmdbId: 10,
+    seasonNumber: 1,
+    episodeNumber: 13,
+    label: 'Catalog episode 13',
+    sourceUrl: '/test-media/capture-test.mp4?episode=13',
+    mimeType: 'video/mp4',
+    rightsBasis: 'licensed',
+  }] })
+  await openShowResumingAt(page, 1, 12)
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  // Cache Source 2's episode 12 before following Source 1 to episode 13.
+  await player.getByRole('button', { name: 'Source 2', exact: true }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await player.getByRole('button', { name: 'Source 1', exact: true }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await sendProviderEvent(page, 'playing', 5, { season: 1, episode: 13 })
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E13' })).toBeVisible()
+  await expect(player.getByRole('button', { name: 'Source 1', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(player.locator('video')).toHaveCount(0)
+  await expect(iframe).toHaveAttribute('src', /[?&]episode=12(?:&|$)/)
+
+  await player.getByRole('button', { name: 'Source 2', exact: true }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', /[?&]episode=13(?:&|$)/)
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await player.getByRole('button', { name: 'Next episode' }).click()
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E14' })).toBeVisible()
+  await expect(iframe).toHaveAttribute('src', /[?&]episode=14(?:&|$)/)
+})
+
+test('invalid provider identities and messages from detached frames cannot change the episode or history', async ({ page }) => {
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 12)
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await sendProviderEvent(page, 'playing', 600, { season: 1, episode: 12 })
+  for (const identity of [
+    { season: 1, episode: 13, tmdb: '99' },
+    { season: 1, episode: 13, mediaType: 'movie' },
+    { season: 1, episode: 13.5 },
+    { season: 1, episode: -1 },
+    { season: 1, episode: 'invalid' },
+    { season: 99, episode: 13 },
+  ]) await sendProviderEvent(page, 'completed', 1000, identity)
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E12' })).toBeVisible()
+  await expect(player.getByRole('button', { name: /^Watch next/ })).toHaveCount(0)
+  await iframe.evaluate((element) => {
+    (window as typeof window & { __oldEpisodeWindow?: Window | null }).__oldEpisodeWindow = (element as HTMLIFrameElement).contentWindow
+  })
+
+  await player.getByRole('button', { name: /Episode title 14\b/ }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', /[?&]episode=14(?:&|$)/)
+  await expect(iframe).toHaveClass(/opacity-100/)
+  await page.evaluate(() => {
+    const data = {
+      type: 'PLAYER_EVENT',
+      data: { player_info: { tmdb: '10', mediaType: 'tv', season: 1, episode: 13 }, player_status: 'completed', player_progress: 1000, player_duration: 1000 },
+    }
+    const message = new MessageEvent('message', { data })
+    // Firefox's constructor rejects cross-origin WindowProxies. Set the
+    // source on the fixture event directly to simulate a delayed old-frame message.
+    Object.defineProperty(message, 'source', { value: (window as typeof window & { __oldEpisodeWindow?: Window }).__oldEpisodeWindow })
+    window.dispatchEvent(message)
+    window.postMessage(data, '*')
+  })
+  await expect(player.getByRole('heading', { name: 'The Expanse — S1 E14' })).toBeVisible()
+  await expect(player.getByRole('button', { name: /^Watch next/ })).toHaveCount(0)
+  await player.getByRole('button', { name: 'Stop player' }).click()
+  await expect.poll(() => watchServer.entries.get('tv:10:1:12')?.position).toBe(600)
+  expect(watchServer.entries.get('tv:10:1:12')?.watched).toBe(false)
+  expect(watchServer.entries.has('tv:10:1:13')).toBe(false)
 })
 
 test('@mobile leaving theater mode keeps the provider player running inline', async ({ page }) => {
