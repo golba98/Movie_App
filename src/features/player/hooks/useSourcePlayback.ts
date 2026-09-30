@@ -32,6 +32,9 @@ interface SourcePlaybackOptions {
  */
 export function useSourcePlayback({ playableSources, resetKey, playbackRequested }: SourcePlaybackOptions) {
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+  // This source advanced inside its own frame. Keep that live frame until
+  // the viewer requests a new player; its original URL now names an old episode.
+  const [followingSourceId, setFollowingSourceId] = useState<string | null>(null)
   const [sourceStates, setSourceStates] = useState<SourceStates>({})
   const [extractionAttempt, setExtractionAttempt] = useState(0)
   const [loadedIframeKey, setLoadedIframeKey] = useState<string | null>(null)
@@ -49,6 +52,7 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
 
   useEffect(() => {
     setSelectedSourceId(null)
+    setFollowingSourceId(null)
     // Cleared now as well: when playback carries on into the next episode, the
     // extraction effect below runs in this same commit and must not mistake
     // the previous episode's player for this one's.
@@ -72,7 +76,12 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
   }, [playableSources, selectedSourceId, failedSourceIds])
 
   const isDynamic = isDynamicSource(activeSource)
-  const activeState = activeSource ? sourceStates[activeSource.id] : undefined
+  const cachedState = activeSource ? sourceStates[activeSource.id] : undefined
+  const activeState = cachedState?.status === 'ready'
+    && cachedState.sourceUrl !== activeSource?.sourceUrl
+    && followingSourceId !== activeSource?.id
+    ? undefined
+    : cachedState
   const extractedUrl = activeState?.status === 'ready' ? activeState.extractedUrl : null
   const playbackKind = activeState?.status === 'ready' ? activeState.playbackKind : 'embed'
   const iframeKey = activeSource && extractedUrl && playbackKind === 'embed' ? `${activeSource.id}|${extractedUrl}|${playerReload}` : null
@@ -96,12 +105,14 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
 
   const selectSource = (sourceId: string) => {
     setSelectedSourceId(sourceId)
+    setFollowingSourceId(null)
     setFallbackNotice(null)
     if (failedSourceIds.has(sourceId)) setSourceStates((prev) => withoutSource(prev, sourceId))
   }
 
   const retryActiveSource = () => {
     if (!activeSource) return
+    setFollowingSourceId(null)
     refreshSourceIdRef.current = activeSource.id
     setSourceStates((prev) => withoutSource(prev, activeSource.id))
     setExtractionAttempt((attempt) => attempt + 1)
@@ -110,6 +121,17 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
   const reloadPlayer = () => {
     retryActiveSource()
     setPlayerReload((count) => count + 1)
+  }
+
+  const followProviderEpisode = () => {
+    if (!activeSource || activeState?.status !== 'ready') return
+    // Pin the provider even if the newly selected episode has a catalog source.
+    setSelectedSourceId(activeSource.id)
+    setFollowingSourceId(activeSource.id)
+    const retained = { [activeSource.id]: activeState }
+    sourceStatesRef.current = retained
+    setSourceStates(retained)
+    setFallbackNotice(null)
   }
 
   const revealIframe = (loadedKey: string) => {
@@ -139,18 +161,23 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
   // A new playback session retries sources that failed in the previous one.
   useEffect(() => {
     if (playbackRequested) return
+    setFollowingSourceId(null)
     setFallbackNotice(null)
     setLoadedIframeKey(null)
     setSourceStates((prev) => {
-      const next = Object.fromEntries(Object.entries(prev).filter(([, state]) => state.status === 'ready'))
+      const next = Object.fromEntries(Object.entries(prev).filter(([sourceId, state]) => (
+        state.status === 'ready' && playableSources.some((source) => source.id === sourceId && source.sourceUrl === state.sourceUrl)
+      )))
       return Object.keys(next).length === Object.keys(prev).length ? prev : next
     })
-  }, [playbackRequested])
+  }, [playbackRequested, playableSources])
 
   useEffect(() => {
     if (!playbackRequested || !activeSource?.sourceUrl || !isDynamic) return
     const existing = sourceStatesRef.current[activeSource.id]
-    if (existing?.status === 'ready' || existing?.status === 'failed') return
+    if (existing?.status === 'failed') return
+    if (existing?.status === 'ready'
+      && (existing.sourceUrl === activeSource.sourceUrl || followingSourceId === activeSource.id)) return
 
     const source = activeSource
     const controller = new AbortController()
@@ -184,7 +211,7 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
           return
         }
         const extractedUrl = data.extractedUrl
-        setSourceStates((prev) => ({ ...prev, [source.id]: { status: 'ready', extractedUrl, playbackKind: kind } }))
+        setSourceStates((prev) => ({ ...prev, [source.id]: { status: 'ready', sourceUrl: source.sourceUrl, extractedUrl, playbackKind: kind } }))
       })
       .catch((error: unknown) => {
         window.clearTimeout(timeout)
@@ -203,7 +230,7 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
         prev[source.id]?.status === 'extracting' ? withoutSource(prev, source.id) : prev
       ))
     }
-  }, [activeSource, isDynamic, playbackRequested, extractionAttempt, markSourceFailed])
+  }, [activeSource, isDynamic, playbackRequested, extractionAttempt, markSourceFailed, followingSourceId])
 
   useEffect(() => {
     if (!playbackRequested || !iframeKey) return
@@ -230,6 +257,7 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
     selectSource,
     retryActiveSource,
     reloadPlayer,
+    followProviderEpisode,
     revealIframe,
     markSourceFailed,
   }

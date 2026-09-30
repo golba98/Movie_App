@@ -67,7 +67,8 @@ export function useRestartRecovery({ iframeRef, active, sessionKey, seasonNumber
 
   return useCallback((progress: EmbedProgress) => {
     const { position, duration, status } = progress
-    // Another episode, e.g. one picked in the provider's own menu.
+    // Episode changes are synchronized by StreamingPlayer before reaching
+    // recovery. Never compare one episode's position with another's.
     if (progress.episode !== undefined && (progress.season !== seasonNumber || progress.episode !== episodeNumber)) return
 
     const accept = () => {

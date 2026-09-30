@@ -4,7 +4,6 @@ import type { PlaybackProgress } from '../../../types/watch-history'
 import { MIN_COUNTED_WATCH_SECONDS, WATCHED_THRESHOLD } from '../../watch-history/history-state'
 import { useWatchedHistory } from '../../watch-history/watch-history-context'
 import { playerDebug } from '../player-debug'
-import { useEmbedProgress } from './useEmbedProgress'
 import { usePlaybackWatcher, type WatcherUpdateReason } from './usePlaybackWatcher'
 import { useRestartRecovery } from './useRestartRecovery'
 
@@ -100,6 +99,7 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
   // Runs after the watcher has reported the previous title, so nothing leaks across.
   useEffect(() => {
     reportedRef.current = null
+    lastSaveRef.current = 0
     lastCommitRef.current = { seconds: readWatchSeconds() }
   }, [sessionKey, readWatchSeconds])
 
@@ -119,10 +119,9 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
   }, [watched, ended, sessionKey, commitWatch, readWatchSeconds])
 
   const onEmbedProgress = useRestartRecovery({ iframeRef, active, sessionKey, seasonNumber, episodeNumber, onProgress: saveProgress })
-  useEmbedProgress(iframeRef, onEmbedProgress)
 
   /** Saves the latest watch time straight away, e.g. before reloading the player. */
   const flush = useCallback(() => commitWatch(readWatchSeconds(), true), [commitWatch, readWatchSeconds])
 
-  return { resumePosition, saveProgress, flush, ended }
+  return { resumePosition, saveProgress, onEmbedProgress, flush, ended }
 }

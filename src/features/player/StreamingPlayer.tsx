@@ -2,9 +2,11 @@ import { AlertCircle, Minimize2, RotateCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MediaSource } from '../../types/media-source'
 import type { MediaItem, MediaType } from '../../types/tmdb'
+import type { EpisodeRef } from '../../types/watch-history'
 import { useWatchedHistory } from '../watch-history/watch-history-context'
 import { nextEpisode, withStartTime } from './episodes'
 import { useEpisodeSelection } from './hooks/useEpisodeSelection'
+import { useEmbedProgress, type EmbedProgress } from './hooks/useEmbedProgress'
 import { useSourcePlayback } from './hooks/useSourcePlayback'
 import { useTheaterFullscreen } from './hooks/useTheaterFullscreen'
 import { useTheaterMode } from './hooks/useTheaterMode'
@@ -32,6 +34,7 @@ interface StreamingPlayerProps {
   sources: MediaSource[]
   theaterMode: boolean
   onTheaterModeChange: (open: boolean) => void
+  onCurrentEpisodeChange?: (episode: EpisodeRef | null) => void
 }
 
 export function StreamingPlayer({
@@ -44,6 +47,7 @@ export function StreamingPlayer({
   sources,
   theaterMode,
   onTheaterModeChange,
+  onCurrentEpisodeChange,
 }: StreamingPlayerProps) {
   const isTv = mediaType === 'tv'
   const { isEpisodeWatched, toggleEpisodeWatched } = useWatchedHistory()
@@ -59,7 +63,9 @@ export function StreamingPlayer({
   const exitButtonRef = useRef<HTMLButtonElement>(null)
 
   const playbackRequested = theaterMode || inlinePlaybackRequested
-  const resetKey = `${id}:${season}:${episode}`
+  const episodeKey = `${mediaType}:${id}:${season}:${episode}`
+  // A provider can change episodes without requesting a new iframe.
+  const resetKey = `${mediaType}:${id}:${selection.requestVersion}`
   const playableSources = useMemo(
     () => playableSourcesFor(sources, mediaType, season, episode),
     [sources, mediaType, season, episode],
@@ -99,6 +105,59 @@ export function StreamingPlayer({
     active: playsNative ? videoPlaying : playbackRequested && iframeLoaded,
     iframeRef,
   })
+  const { onEmbedProgress } = progress
+
+  const pendingProviderProgressRef = useRef<{
+    report: EmbedProgress
+    resetKey: string
+    iframeKey: string
+    frameWindow: Window | null
+  } | null>(null)
+
+  useEmbedProgress(iframeRef, (report) => {
+    if (!isDynamic || !playbackRequested || !iframeKey) return
+    if (report.tmdbId !== undefined && report.tmdbId !== id) return
+    if (report.mediaType !== undefined && report.mediaType !== mediaType) return
+    if (report.season !== undefined || report.episode !== undefined) {
+      if (!isTv || report.season === undefined || report.episode === undefined) return
+      if (report.season !== season || report.episode !== episode) {
+        // A title identity is required to adopt a different episode. Older
+        // progress-only formats still track the episode requested by the app.
+        if (!iframeLoaded || report.tmdbId !== id || report.mediaType !== 'tv') return
+        if (!selection.adoptProviderEpisode({ seasonNumber: report.season, episodeNumber: report.episode })) return
+        progress.flush()
+        playback.followProviderEpisode()
+        pendingProviderProgressRef.current = {
+          report,
+          resetKey,
+          iframeKey,
+          frameWindow: iframeRef.current?.contentWindow ?? null,
+        }
+        return
+      }
+      if (report.tmdbId === id && report.mediaType === 'tv') {
+        selection.adoptProviderEpisode({ seasonNumber: report.season, episodeNumber: report.episode })
+      }
+    }
+    onEmbedProgress(report)
+  })
+
+  // Watch progress and recovery have reset for the new episode before this
+  // effect replays its first report. Nothing is attributed to the old episode.
+  useEffect(() => {
+    const pending = pendingProviderProgressRef.current
+    if (!pending) return
+    pendingProviderProgressRef.current = null
+    if (!playbackRequested || pending.resetKey !== resetKey || pending.iframeKey !== iframeKey
+      || pending.frameWindow !== iframeRef.current?.contentWindow
+      || pending.report.season !== season || pending.report.episode !== episode) return
+    onEmbedProgress(pending.report)
+  }, [season, episode, resetKey, iframeKey, playbackRequested, onEmbedProgress])
+
+  const watchingEpisode = isTv && (playsNative ? videoPlaying : playbackRequested && Boolean(iframeKey))
+  useEffect(() => {
+    onCurrentEpisodeChange?.(watchingEpisode ? { seasonNumber: season, episodeNumber: episode } : null)
+  }, [watchingEpisode, season, episode, onCurrentEpisodeChange])
 
   const listings = useMemo(
     () => episodeListings(sources, selection.episodes, id, season),
@@ -141,7 +200,7 @@ export function StreamingPlayer({
   const nextName = next?.seasonNumber === season
     ? listings.find((listing) => listing.episodeNumber === next.episodeNumber)?.episode?.name
     : undefined
-  const showsNextPrompt = Boolean(nextLabel) && (playsNative || (showsIframe && iframeLoaded)) && progress.ended && dismissedPromptKey !== resetKey
+  const showsNextPrompt = Boolean(nextLabel) && (playsNative || (showsIframe && iframeLoaded)) && progress.ended && dismissedPromptKey !== episodeKey
 
   // The provider's own buffering spinner lives inside its cross-origin frame,
   // where we can't clear it; reloading the frame at the last saved position is
@@ -219,7 +278,7 @@ export function StreamingPlayer({
                 episodeName={nextName}
                 theater={theaterMode}
                 onWatch={() => watchNext(true)}
-                onDismiss={() => setDismissedPromptKey(resetKey)}
+                onDismiss={() => setDismissedPromptKey(episodeKey)}
               />
             )}
             {!playsNative ? (

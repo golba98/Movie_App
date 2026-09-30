@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { isRecord } from '../../../lib/is-record'
+import type { MediaType } from '../../../types/tmdb'
 import type { PlaybackProgress } from '../../../types/watch-history'
 import { playerDebug } from '../player-debug'
 
@@ -12,6 +13,8 @@ export interface EmbedProgress extends PlaybackProgress {
   status?: string
   season?: number
   episode?: number
+  tmdbId?: number
+  mediaType?: MediaType
 }
 
 function toNumber(value: unknown) {
@@ -20,12 +23,21 @@ function toNumber(value: unknown) {
 }
 
 function parseDetails(data: Record<string, unknown>) {
-  const details: Pick<EmbedProgress, 'status' | 'season' | 'episode'> = {}
+  const details: Partial<EmbedProgress> = {}
   if (typeof data.player_status === 'string') details.status = data.player_status
+  if (data.player_info !== undefined && !isRecord(data.player_info)) return null
   if (isRecord(data.player_info)) {
-    const season = toNumber(data.player_info.season)
-    const episode = toNumber(data.player_info.episode)
-    if (season !== null && episode !== null) Object.assign(details, { season, episode })
+    for (const [field, key] of [['season', 'season'], ['episode', 'episode'], ['tmdb', 'tmdbId']] as const) {
+      if (data.player_info[field] === undefined) continue
+      const value = toNumber(data.player_info[field])
+      if (value === null || !Number.isInteger(value) || value <= 0) return null
+      details[key] = value
+    }
+    const mediaType = data.player_info.mediaType
+    if (mediaType !== undefined) {
+      if (mediaType !== 'tv' && mediaType !== 'movie') return null
+      details.mediaType = mediaType
+    }
   }
   return details
 }
@@ -47,17 +59,19 @@ function parseEmbedProgress(raw: unknown): EmbedProgress | null {
   if (isRecord(data.data)) data = data.data
   if (!isRecord(data)) return null
 
+  const details = parseDetails(data)
+  if (!details) return null
   const duration = toNumber(data.duration) ?? toNumber(data.player_duration)
   if (!duration || duration <= 0) return null
   // Its last position can fall short of the duration, but completed is the end.
-  if (data.player_status === 'completed') return { position: duration, duration, ...parseDetails(data) }
+  if (data.player_status === 'completed') return { ...details, position: duration, duration }
   const position = toNumber(data.currentTime)
     ?? toNumber(data.time)
     ?? toNumber(data.timestamp)
     ?? toNumber(data.player_progress)
-  if (position !== null) return position >= 0 ? { position: Math.min(position, duration), duration, ...parseDetails(data) } : null
+  if (position !== null) return position >= 0 ? { ...details, position: Math.min(position, duration), duration } : null
   const percent = toNumber(data.progress)
-  if (percent !== null && percent >= 0 && percent <= 100) return { position: (percent / 100) * duration, duration }
+  if (percent !== null && percent >= 0 && percent <= 100) return { ...details, position: (percent / 100) * duration, duration }
   return null
 }
 
