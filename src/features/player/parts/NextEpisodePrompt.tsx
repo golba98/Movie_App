@@ -9,7 +9,7 @@ interface NextEpisodePromptProps {
   onDismiss: () => void
 }
 
-// Floats on the right once an episode is finished, above the provider's
+// Floats on the right once an episode has ended, above the provider's
 // subtitles and controls. Phones show a short player, so it sits in the top
 // corner there, below the theater buttons in theater mode.
 export function NextEpisodePrompt({ label, episodeName, theater, onWatch, onDismiss }: NextEpisodePromptProps) {

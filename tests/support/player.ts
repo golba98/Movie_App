@@ -181,7 +181,7 @@ function vsembedFrame(page: Page) {
 /** Posts a vsembed PLAYER_EVENT for a 1000-second episode, as its player does. */
 export async function sendProviderEvent(
   page: Page,
-  status: 'playing' | 'paused' | 'seeked',
+  status: 'playing' | 'paused' | 'seeked' | 'completed',
   progress: number,
   episode: { season: number; episode: number } = { season: 1, episode: 15 },
 ) {

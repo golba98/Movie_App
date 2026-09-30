@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { MediaItem } from '../../../types/tmdb'
 import type { PlaybackProgress } from '../../../types/watch-history'
 import { MIN_COUNTED_WATCH_SECONDS, WATCHED_THRESHOLD } from '../../watch-history/history-state'
 import { useWatchedHistory } from '../../watch-history/watch-history-context'
+import { playerDebug } from '../player-debug'
 import { useEmbedProgress } from './useEmbedProgress'
 import { usePlaybackWatcher, type WatcherUpdateReason } from './usePlaybackWatcher'
 import { useRestartRecovery } from './useRestartRecovery'
@@ -11,6 +12,9 @@ const PROGRESS_SAVE_INTERVAL_MS = 5_000
 // Saved positions outside this window restart the title instead of resuming.
 const MIN_RESUME_SECONDS = 10
 export const MAX_RESUME_SHARE = 0.95
+// A reported position this close to the duration is the end: players report
+// periodically, so the last report can fall a moment short of it.
+const END_TOLERANCE_SECONDS = 2
 
 export type ProgressSaveMode = 'throttled' | 'now' | 'urgent'
 
@@ -33,6 +37,8 @@ interface WatchProgressOptions {
  * finishing, except while it has restarted on its own (see useRestartRecovery).
  * Once a title's player has reported, watch time never finishes it: that count
  * includes paused time and replays, and the player may not have reported yet.
+ * `ended` is true while the player's latest position is the title's end; a
+ * player that never reports its position never ends.
  */
 export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMinutes, active, iframeRef }: WatchProgressOptions) {
   const { mediaType, id } = media
@@ -53,6 +59,10 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
   const playerReports = entry?.duration != null
   const runtimeSeconds = runtimeMinutes && runtimeMinutes > 0 ? runtimeMinutes * 60 : 0
   const sessionKey = `${mediaType}:${id}:${seasonNumber}:${episodeNumber}`
+
+  const [ending, setEnding] = useState({ key: sessionKey, ended: false })
+  if (ending.key !== sessionKey) setEnding({ key: sessionKey, ended: false })
+  const ended = ending.key === sessionKey && ending.ended
 
   const lastSaveRef = useRef(0)
   // The latest position reported by the player for the current title, if any.
@@ -96,12 +106,17 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
   const saveProgress = useCallback((position: number, duration: number, mode: ProgressSaveMode = 'throttled') => {
     if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0) return
     reportedRef.current = { position, duration }
+    const atEnd = duration - position <= END_TOLERANCE_SECONDS
+    if (atEnd !== ended) {
+      if (atEnd) playerDebug('player reported the end', { position: Math.round(position), duration: Math.round(duration) })
+      setEnding({ key: sessionKey, ended: atEnd })
+    }
     const crossedThreshold = !watched && position / duration >= WATCHED_THRESHOLD
     const now = Date.now()
     if (mode === 'throttled' && !crossedThreshold && now - lastSaveRef.current < PROGRESS_SAVE_INTERVAL_MS) return
     lastSaveRef.current = now
     commitWatch(readWatchSeconds(), mode === 'urgent')
-  }, [watched, commitWatch, readWatchSeconds])
+  }, [watched, ended, sessionKey, commitWatch, readWatchSeconds])
 
   const onEmbedProgress = useRestartRecovery({ iframeRef, active, sessionKey, seasonNumber, episodeNumber, onProgress: saveProgress })
   useEmbedProgress(iframeRef, onEmbedProgress)
@@ -109,5 +124,5 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
   /** Saves the latest watch time straight away, e.g. before reloading the player. */
   const flush = useCallback(() => commitWatch(readWatchSeconds(), true), [commitWatch, readWatchSeconds])
 
-  return { resumePosition, saveProgress, flush }
+  return { resumePosition, saveProgress, flush, ended }
 }

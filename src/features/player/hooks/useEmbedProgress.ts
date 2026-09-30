@@ -49,6 +49,8 @@ function parseEmbedProgress(raw: unknown): EmbedProgress | null {
 
   const duration = toNumber(data.duration) ?? toNumber(data.player_duration)
   if (!duration || duration <= 0) return null
+  // Its last position can fall short of the duration, but completed is the end.
+  if (data.player_status === 'completed') return { position: duration, duration, ...parseDetails(data) }
   const position = toNumber(data.currentTime)
     ?? toNumber(data.time)
     ?? toNumber(data.timestamp)

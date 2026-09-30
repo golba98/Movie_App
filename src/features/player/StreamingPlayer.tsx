@@ -81,12 +81,6 @@ export function StreamingPlayer({
     if (theaterMode) setInlinePlaybackRequested(true)
   }, [theaterMode, resetKey])
 
-  // Whether this episode was already watched when it opened, so the prompt
-  // only appears for an episode finished in this sitting, not on a rewatch.
-  const episodeWatched = isTv && isEpisodeWatched(id, season, episode)
-  const [watchedAtOpen, setWatchedAtOpen] = useState({ key: resetKey, watched: episodeWatched })
-  if (watchedAtOpen.key !== resetKey) setWatchedAtOpen({ key: resetKey, watched: episodeWatched })
-  const finishedThisSitting = episodeWatched && watchedAtOpen.key === resetKey && !watchedAtOpen.watched
   const [dismissedPromptKey, setDismissedPromptKey] = useState<string | null>(null)
 
   const exitTheater = useCallback(() => onTheaterModeChange(false), [onTheaterModeChange])
@@ -147,7 +141,7 @@ export function StreamingPlayer({
   const nextName = next?.seasonNumber === season
     ? listings.find((listing) => listing.episodeNumber === next.episodeNumber)?.episode?.name
     : undefined
-  const showsNextPrompt = Boolean(nextLabel) && (playsNative || (showsIframe && iframeLoaded)) && finishedThisSitting && dismissedPromptKey !== resetKey
+  const showsNextPrompt = Boolean(nextLabel) && (playsNative || (showsIframe && iframeLoaded)) && progress.ended && dismissedPromptKey !== resetKey
 
   // The provider's own buffering spinner lives inside its cross-origin frame,
   // where we can't clear it; reloading the frame at the last saved position is
