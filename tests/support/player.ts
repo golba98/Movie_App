@@ -155,13 +155,18 @@ export async function mockDynamicShow(page: Page, embedUrl: EmbedUrl = exampleEm
 
 const VSEMBED_FRAME = /^https:\/\/vsembed\.ru\//
 
+// The parameters the Worker attaches to a Source 1 player once it has chosen a subtitle.
+export const SOURCE_ONE_SUBTITLE = 'sub_url=https%3A%2F%2Ffedora.test%2Fapi%2Fsubtitles%2F0b0c5a36-3d7e-4a55-9a52-6f3f0f4c8f21.vtt&sub_label=English&sub_lang=en'
+
 /**
  * Serves The Expanse through Source 1's embed host, vsembed. The stub player
  * records every message the app sends it in `window.__commands`; tests post
  * the provider's own events from inside it with `sendProviderEvent`.
  */
-export async function mockVsembedShow(page: Page) {
-  await mockDynamicShow(page, (season, episode) => `https://vsembed.ru/embed/tv?tmdb=10&season=${season}&episode=${episode}`)
+export async function mockVsembedShow(page: Page, { subtitle = false } = {}) {
+  await mockDynamicShow(page, (season, episode) => (
+    `https://vsembed.ru/embed/tv?tmdb=10&season=${season}&episode=${episode}${subtitle ? `&${SOURCE_ONE_SUBTITLE}` : ''}`
+  ))
   await page.route('https://vsembed.ru/**', (route) => route.fulfill({
     status: 200,
     contentType: 'text/html',

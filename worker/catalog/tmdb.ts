@@ -3,7 +3,7 @@ import { requireUser } from '../auth/sessions'
 import { ApiError } from '../http'
 
 const TMDB_API = 'https://api.themoviedb.org/3'
-const TITLE_CACHE_SECONDS = 86_400
+const DETAILS_CACHE_SECONDS = 86_400
 const MAX_PARAMETER_LENGTH = 500
 
 // The browser may only reach the TMDB endpoints the app actually uses.
@@ -62,9 +62,29 @@ export async function proxyTmdb(request: Request, env: Env, path: string) {
 export async function fetchTmdbTitle(env: Env, mediaType: MediaType, tmdbId: number): Promise<string> {
   const response = await fetch(`${TMDB_API}/${mediaType}/${tmdbId}`, {
     headers: tmdbHeaders(env),
-    cf: { cacheTtl: TITLE_CACHE_SECONDS } as unknown as { cacheTtl: number },
+    cf: { cacheTtl: DETAILS_CACHE_SECONDS } as unknown as { cacheTtl: number },
   })
   if (!response.ok) throw new Error('Failed to fetch TMDB details')
   const data = (await response.json()) as { title?: string; name?: string }
   return (mediaType === 'movie' ? data.title : data.name) ?? ''
+}
+
+/** A movie's or an episode's runtime in minutes, cached at the edge for a day; null when TMDB has none. */
+export async function fetchTmdbRuntime(
+  env: Env,
+  media: { mediaType: MediaType; tmdbId: number; season: number | null; episode: number | null },
+  signal?: AbortSignal,
+): Promise<number | null> {
+  if (!env.TMDB_ACCESS_TOKEN) return null
+  const path = media.mediaType === 'movie'
+    ? `/movie/${media.tmdbId}`
+    : `/tv/${media.tmdbId}/season/${media.season}/episode/${media.episode}`
+  const response = await fetch(`${TMDB_API}${path}`, {
+    headers: tmdbHeaders(env),
+    signal,
+    cf: { cacheTtl: DETAILS_CACHE_SECONDS } as unknown as { cacheTtl: number },
+  })
+  if (!response.ok) return null
+  const { runtime } = (await response.json()) as { runtime?: number | null }
+  return typeof runtime === 'number' && runtime > 0 ? runtime : null
 }

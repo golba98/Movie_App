@@ -18,8 +18,10 @@ describe('provider playback configuration', () => {
         embedBlocked: null,
         playbackKind: 'embed',
       } })
-      expect(outbound).toHaveBeenCalledTimes(1)
+      // The player page is probed once; the subtitle lookup finds nothing usable, so no subtitle is attached.
+      expect(outbound).toHaveBeenCalledTimes(2)
       expect(outbound).toHaveBeenCalledWith('https://vsembed.ru/embed/tv?tmdb=387&season=1&episode=30', expect.objectContaining({ method: 'GET' }))
+      expect(outbound).toHaveBeenCalledWith('https://data.vidsrc.sh/api.php?type=tv&tmdb=387&season=1&episode=30', expect.anything())
     } finally {
       vi.unstubAllGlobals()
     }

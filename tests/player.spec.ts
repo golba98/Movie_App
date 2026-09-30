@@ -8,6 +8,7 @@ import {
   openShowResumingAt,
   providerCommands,
   sendProviderEvent,
+  SOURCE_ONE_SUBTITLE,
   watchFor,
 } from './support/player'
 
@@ -666,25 +667,27 @@ test('@mobile Source 1 resumes an unfinished episode at its saved position', asy
 
   const player = page.locator('#streaming-player')
   await player.getByRole('button', { name: 'Play episode' }).click()
-  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&ds_lang=en&startAt=400')
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&startAt=400')
 })
 
-// Source 1 picks a subtitle track anew on every load unless told which language to prefer.
-test('@mobile Source 1 asks for English subtitles on every load', async ({ page }) => {
-  await mockVsembedShow(page)
-  await openShowResumingAt(page, 1, 15)
+// The Worker attaches the subtitle it checked for the episode. The app passes it
+// through and adds no language preference: `ds_lang` stops Source 1 restoring a
+// track the viewer picked in its own menu.
+test('@mobile Source 1 keeps the subtitle the server chose on every load', async ({ page }) => {
+  await mockVsembedShow(page, { subtitle: true })
+  await openShowResumingAt(page, 1, 15, { position: 400, duration: 1000 })
 
   const player = page.locator('#streaming-player')
   const iframe = player.locator('iframe')
   await player.getByRole('button', { name: 'Play episode' }).click()
-  await expect(iframe).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&ds_lang=en')
+  await expect(iframe).toHaveAttribute('src', `https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&${SOURCE_ONE_SUBTITLE}&startAt=400`)
 
   await player.getByRole('button', { name: 'Stop player' }).click()
   await player.getByRole('button', { name: 'Play episode' }).click()
-  await expect(iframe).toHaveAttribute('src', /^https:\/\/vsembed\.ru\/.*[?&]ds_lang=en(&|$)/)
+  await expect(iframe).toHaveAttribute('src', new RegExp(`^https://vsembed\\.ru/embed/tv\\?tmdb=10&season=1&episode=15&${SOURCE_ONE_SUBTITLE.replace(/[.?]/g, '\\$&')}(&startAt=\\d+)?$`))
 
   await player.getByRole('button', { name: 'Next episode' }).click()
-  await expect(iframe).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=16&ds_lang=en')
+  await expect(iframe).toHaveAttribute('src', `https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=16&${SOURCE_ONE_SUBTITLE}`)
 })
 
 test('players other than Source 1 get no subtitle preference', async ({ page }) => {
