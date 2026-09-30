@@ -666,7 +666,34 @@ test('@mobile Source 1 resumes an unfinished episode at its saved position', asy
 
   const player = page.locator('#streaming-player')
   await player.getByRole('button', { name: 'Play episode' }).click()
-  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&startAt=400')
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&ds_lang=en&startAt=400')
+})
+
+// Source 1 picks a subtitle track anew on every load unless told which language to prefer.
+test('@mobile Source 1 asks for English subtitles on every load', async ({ page }) => {
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&ds_lang=en')
+
+  await player.getByRole('button', { name: 'Stop player' }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', /^https:\/\/vsembed\.ru\/.*[?&]ds_lang=en(&|$)/)
+
+  await player.getByRole('button', { name: 'Next episode' }).click()
+  await expect(iframe).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=16&ds_lang=en')
+})
+
+test('players other than Source 1 get no subtitle preference', async ({ page }) => {
+  await mockDynamicShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://player.example.test/embed/tv/10/1/15')
 })
 
 // Source 1 falls over to another stream host mid-episode and that host starts

@@ -11,17 +11,39 @@ const EMBED_START_PARAMS: Record<string, string> = {
   'vsembed.ru': 'startAt',
 }
 
-export function withStartTime(url: string, seconds: number | null | undefined) {
-  if (!seconds || seconds < 1) return url
+// Embed hosts that pick a subtitle track themselves, and the query parameter
+// naming the language to prefer. Without it Source 1 picks anew on every load,
+// including when it moves to another stream host, often in another language.
+const EMBED_SUBTITLE_PARAMS: Record<string, string> = {
+  'vsembed.ru': 'ds_lang',
+}
+// The app is in English, so its players prefer English subtitles.
+const SUBTITLE_LANGUAGE = 'en'
+
+function embedParam(url: string, params: Record<string, string>) {
   try {
     const parsed = new URL(url)
-    const param = EMBED_START_PARAMS[parsed.hostname.replace(/^www\./, '')]
-    if (!param) return url
-    parsed.searchParams.set(param, String(Math.floor(seconds)))
-    return parsed.href
+    const param = params[parsed.hostname.replace(/^www\./, '')]
+    return param ? { parsed, param } : null
   } catch {
-    return url
+    return null
   }
+}
+
+export function withStartTime(url: string, seconds: number | null | undefined) {
+  if (!seconds || seconds < 1) return url
+  const embed = embedParam(url, EMBED_START_PARAMS)
+  if (!embed) return url
+  embed.parsed.searchParams.set(embed.param, String(Math.floor(seconds)))
+  return embed.parsed.href
+}
+
+// Leaves a language already in the URL, e.g. from a provider's configured embed pattern.
+export function withSubtitleLanguage(url: string) {
+  const embed = embedParam(url, EMBED_SUBTITLE_PARAMS)
+  if (!embed || embed.parsed.searchParams.has(embed.param)) return url
+  embed.parsed.searchParams.set(embed.param, SUBTITLE_LANGUAGE)
+  return embed.parsed.href
 }
 
 type EpisodeSource = MediaSource & EpisodeRef

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MediaSource } from '../../types/media-source'
 import type { MediaItem, MediaType } from '../../types/tmdb'
 import { useWatchedHistory } from '../watch-history/watch-history-context'
-import { nextEpisode, withStartTime } from './episodes'
+import { nextEpisode, withStartTime, withSubtitleLanguage } from './episodes'
 import { useEpisodeSelection } from './hooks/useEpisodeSelection'
 import { useSourcePlayback } from './hooks/useSourcePlayback'
 import { useTheaterFullscreen } from './hooks/useTheaterFullscreen'
@@ -124,7 +124,7 @@ export function StreamingPlayer({
 
   let stage: DynamicStage
   if (!playbackRequested) stage = { kind: 'idle' }
-  else if (playback.extractedUrl && iframeKey) stage = { kind: 'frame', iframeKey, url: playback.extractedUrl, loaded: iframeLoaded }
+  else if (playback.extractedUrl && iframeKey) stage = { kind: 'frame', iframeKey, url: withSubtitleLanguage(playback.extractedUrl), loaded: iframeLoaded }
   else if (activeState?.status === 'failed') stage = { kind: 'failed', message: activeState.message }
   else stage = { kind: 'preparing' }
 
