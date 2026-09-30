@@ -554,11 +554,13 @@ test('a finished episode offers the next one, which starts without another click
   await expect(player.getByRole('button', { name: 'Next episode' })).toBeVisible()
   await expect(watchNext).toHaveCount(0)
 
-  // The provider reports the credits; the episode is now finished.
-  reported.time = 950
+  // The provider reports the end of the episode.
+  reported.time = 1000
   await player.getByRole('button', { name: 'Reload player' }).click()
   await expect(watchNext).toHaveText('Watch next · S1 E16 — Episode title 16')
 
+  // The next episode opens at its start.
+  reported.time = 0
   await watchNext.click()
   await expect(player.getByRole('heading', { name: 'The Expanse — S1 E16' })).toBeVisible()
   await expect(player.getByRole('button', { name: /Episode title 16\b/ })).toHaveAttribute('aria-pressed', 'true')
@@ -567,10 +569,35 @@ test('a finished episode offers the next one, which starts without another click
   await expect(watchNext).toHaveCount(0)
 })
 
+// An episode counts as watched at 90%, during the credits; the prompt waits for the end.
+test('Watch next appears once the episode ends, not when it counts as watched', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  const watchNext = player.getByRole('button', { name: /^Watch next/ })
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.locator('iframe')).toHaveClass(/opacity-100/)
+
+  await sendProviderEvent(page, 'playing', 950)
+  await expect(player.locator('[data-episode="15"]').getByRole('button', { name: 'Mark as unwatched' })).toBeVisible()
+  await expect(watchNext).toHaveCount(0)
+
+  await sendProviderEvent(page, 'playing', 1000)
+  await expect(watchNext).toHaveText('Watch next · S1 E16 — Episode title 16')
+
+  // Seeking back into the episode hides it until the episode ends again.
+  await sendProviderEvent(page, 'seeked', 900)
+  await expect(watchNext).toHaveCount(0)
+  await sendProviderEvent(page, 'completed', 995)
+  await expect(watchNext).toBeVisible()
+})
+
 test('the next episode continues into the next season, can be dismissed, and ends with the show', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   const reported = await mockDynamicShow(page)
-  reported.time = 950
+  reported.time = 1000
   await openShowResumingAt(page, 1, 20)
 
   const player = page.locator('#streaming-player')
@@ -580,7 +607,7 @@ test('the next episode continues into the next season, can be dismissed, and end
   await player.getByRole('button', { name: 'Dismiss next episode' }).click()
   await expect(watchNext).toHaveCount(0)
 
-  // A rewatch of a finished episode doesn't prompt, but can still move on.
+  // Once dismissed, the episode doesn't prompt again, but can still move on.
   await player.getByRole('button', { name: /Episode title 19\b/ }).click()
   await player.getByRole('button', { name: /Episode title 20\b/ }).click()
   await player.getByRole('button', { name: 'Play episode' }).click()
@@ -601,7 +628,7 @@ test('the next episode continues into the next season, can be dismissed, and end
 test('the next episode prompt works in theater mode and keeps the theater open', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   const reported = await mockDynamicShow(page)
-  reported.time = 950
+  reported.time = 1000
   await openShowResumingAt(page, 1, 15)
 
   await page.getByRole('button', { name: 'Resume S1 E15' }).click()
@@ -610,6 +637,7 @@ test('the next episode prompt works in theater mode and keeps the theater open',
   await expect(watchNext).toBeVisible()
   await expect(watchNext).toBeInViewport()
 
+  reported.time = 0
   await watchNext.click()
   const player = page.locator('#streaming-player')
   await expect(player.locator('iframe')).toHaveAttribute('src', 'https://player.example.test/embed/tv/10/1/16')
@@ -622,7 +650,7 @@ test('Source 1 progress messages mark the final episode of a season watched and 
   await page.setViewportSize({ width: 1280, height: 720 })
   const reported = await mockDynamicShow(page)
   reported.format = 'vsembed'
-  reported.time = 950
+  reported.time = 1000
   await openShowResumingAt(page, 1, 20)
 
   const player = page.locator('#streaming-player')
@@ -638,7 +666,34 @@ test('@mobile Source 1 resumes an unfinished episode at its saved position', asy
 
   const player = page.locator('#streaming-player')
   await player.getByRole('button', { name: 'Play episode' }).click()
-  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&startAt=400')
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&ds_lang=en&startAt=400')
+})
+
+// Source 1 picks a subtitle track anew on every load unless told which language to prefer.
+test('@mobile Source 1 asks for English subtitles on every load', async ({ page }) => {
+  await mockVsembedShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  const iframe = player.locator('iframe')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=15&ds_lang=en')
+
+  await player.getByRole('button', { name: 'Stop player' }).click()
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(iframe).toHaveAttribute('src', /^https:\/\/vsembed\.ru\/.*[?&]ds_lang=en(&|$)/)
+
+  await player.getByRole('button', { name: 'Next episode' }).click()
+  await expect(iframe).toHaveAttribute('src', 'https://vsembed.ru/embed/tv?tmdb=10&season=1&episode=16&ds_lang=en')
+})
+
+test('players other than Source 1 get no subtitle preference', async ({ page }) => {
+  await mockDynamicShow(page)
+  await openShowResumingAt(page, 1, 15)
+
+  const player = page.locator('#streaming-player')
+  await player.getByRole('button', { name: 'Play episode' }).click()
+  await expect(player.locator('iframe')).toHaveAttribute('src', 'https://player.example.test/embed/tv/10/1/15')
 })
 
 // Source 1 falls over to another stream host mid-episode and that host starts
@@ -720,7 +775,7 @@ test('@mobile leaving theater mode keeps the provider player running inline', as
 
 test('@mobile the Watch next prompt sits on the right, clear of the subtitles and the player buttons', async ({ page }) => {
   const reported = await mockDynamicShow(page)
-  reported.time = 950
+  reported.time = 1000
   await openShowResumingAt(page, 1, 15)
 
   const player = page.locator('#streaming-player')
