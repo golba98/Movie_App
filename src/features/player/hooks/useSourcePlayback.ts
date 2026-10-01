@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { MediaSource } from '../../../types/media-source'
+import type { MediaSource, SubtitleContext } from '../../../types/media-source'
+import { subtitleFitsRuntime } from '../../../lib/subtitle-timing'
 import { ApiClientError } from '../../../lib/api-client'
 import { extractPlayer } from '../api'
 import { logIframeConfiguration, playerDebug, urlHost } from '../player-debug'
+import { readViewingSession, writeViewingSession, sourceFingerprint } from '../viewing-session'
 import {
   getSourceLabel,
   isDynamicSource,
@@ -20,6 +22,8 @@ const IFRAME_REVEAL_DELAY_MS = 180
 
 interface SourcePlaybackOptions {
   playableSources: MediaSource[]
+  accountId: string | null
+  mediaKey: string
   // A new key (another title or episode) forgets every source's state.
   resetKey: string
   // The viewer asked a dynamic source to play, inline or in theater mode.
@@ -30,7 +34,10 @@ interface SourcePlaybackOptions {
  * Chooses which source plays and drives dynamic sources through extraction
  * and iframe loading. A failed source switches to another available source.
  */
-export function useSourcePlayback({ playableSources, resetKey, playbackRequested }: SourcePlaybackOptions) {
+export function useSourcePlayback({ playableSources, resetKey, playbackRequested, accountId, mediaKey }: SourcePlaybackOptions) {
+  const savedSession = useMemo(() => readViewingSession(accountId, mediaKey), [accountId, mediaKey])
+  const subtitleContextRef = useRef<{ mediaKey: string; sourceId: string; context: SubtitleContext } | null>(null)
+  const correctedRef = useRef(new Set<string>())
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
   // This source advanced inside its own frame. Keep that live frame until
   // the viewer requests a new player; its original URL now names an old episode.
@@ -72,8 +79,10 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
   const activeSource = useMemo(() => {
     if (playableSources.length === 0) return undefined
     const selected = selectedSourceId ? playableSources.find((source) => source.id === selectedSourceId) : undefined
-    return selected ?? playableSources.find((source) => !failedSourceIds.has(source.id)) ?? playableSources[0]
-  }, [playableSources, selectedSourceId, failedSourceIds])
+    const remembered = savedSession ? playableSources.find((source) => source.id === savedSession.sourceId
+      && sourceFingerprint(source) === savedSession.sourceFingerprint && !failedSourceIds.has(source.id)) : undefined
+    return selected ?? remembered ?? playableSources.find((source) => !failedSourceIds.has(source.id)) ?? playableSources[0]
+  }, [playableSources, selectedSourceId, failedSourceIds, savedSession])
 
   const isDynamic = isDynamicSource(activeSource)
   const cachedState = activeSource ? sourceStates[activeSource.id] : undefined
@@ -127,6 +136,14 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
     if (!activeSource || activeState?.status !== 'ready') return
     // Pin the provider even if the newly selected episode has a catalog source.
     setSelectedSourceId(activeSource.id)
+    // A custom track cannot follow an episode change inside an opaque frame.
+    if (activeState.subtitles || new URL(activeState.extractedUrl).searchParams.has('sub_url')) {
+      setFollowingSourceId(null)
+      sourceStatesRef.current = {}
+      setSourceStates({})
+      setLoadedIframeKey(null)
+      return
+    }
     setFollowingSourceId(activeSource.id)
     const retained = { [activeSource.id]: activeState }
     sourceStatesRef.current = retained
@@ -192,7 +209,13 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
 
     const refresh = refreshSourceIdRef.current === source.id
     if (refresh) refreshSourceIdRef.current = null
-    extractPlayer(source.sourceUrl, controller.signal, refresh)
+    const observed = subtitleContextRef.current
+    const stored = savedSession?.sourceId === source.id && savedSession.sourceFingerprint === sourceFingerprint(source) ? savedSession : null
+    const context = observed?.mediaKey === mediaKey && observed.sourceId === source.id ? observed.context : {
+      observedDuration: stored?.duration, releaseFingerprint: stored?.releaseFingerprint ?? stored?.subtitles?.releaseFingerprint,
+      subtitleId: stored?.subtitles?.id,
+    }
+    extractPlayer(source.sourceUrl, controller.signal, refresh, context)
       .then((data) => {
         window.clearTimeout(timeout)
         if (controller.signal.aborted) return
@@ -211,7 +234,7 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
           return
         }
         const extractedUrl = data.extractedUrl
-        setSourceStates((prev) => ({ ...prev, [source.id]: { status: 'ready', sourceUrl: source.sourceUrl, extractedUrl, playbackKind: kind } }))
+        setSourceStates((prev) => ({ ...prev, [source.id]: { status: 'ready', sourceUrl: source.sourceUrl, extractedUrl, playbackKind: kind, subtitles: data.subtitles, subtitleNotice: data.subtitleNotice, subtitleContext: data.subtitleContext } }))
       })
       .catch((error: unknown) => {
         window.clearTimeout(timeout)
@@ -230,7 +253,7 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
         prev[source.id]?.status === 'extracting' ? withoutSource(prev, source.id) : prev
       ))
     }
-  }, [activeSource, isDynamic, playbackRequested, extractionAttempt, markSourceFailed, followingSourceId])
+  }, [activeSource, isDynamic, playbackRequested, extractionAttempt, markSourceFailed, followingSourceId, savedSession, mediaKey])
 
   useEffect(() => {
     if (!playbackRequested || !iframeKey) return
@@ -243,6 +266,51 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
     const timeout = window.setTimeout(() => markSourceFailed(source, 'load-timeout'), IFRAME_LOAD_TIMEOUT_MS)
     return () => window.clearTimeout(timeout)
   }, [playbackRequested, iframeKey, iframeLoaded, activeSource, markSourceFailed])
+
+  useEffect(() => {
+    if (!activeSource || (isDynamic && activeState?.status !== 'ready')) return
+    const previous = readViewingSession(accountId, mediaKey)
+    const matches = previous?.sourceFingerprint === sourceFingerprint(activeSource)
+    writeViewingSession(accountId, mediaKey, {
+      sourceId: activeSource.id, sourceFingerprint: sourceFingerprint(activeSource),
+      duration: matches ? previous?.duration : undefined,
+      releaseFingerprint: activeState?.status === 'ready' ? activeState.subtitleContext?.releaseFingerprint : undefined,
+      subtitles: activeState?.status === 'ready' ? activeState.subtitles : null,
+    })
+    if (activeState?.status === 'ready') {
+      playerDebug('subtitle session resolved', {
+        media: mediaKey, sourceId: activeSource.id, subtitleId: activeState.subtitles?.id ?? null,
+        provider: activeState.subtitles?.provider ?? null, language: activeState.subtitles?.language ?? null,
+        release: activeState.subtitleContext?.releaseFingerprint ?? null,
+        runtime: activeState.subtitleContext?.runtimeSeconds ?? null,
+        lastCue: activeState.subtitles?.lastCueSeconds ?? null, captionReadiness: 'provider-owned', activeCue: 'unavailable',
+      })
+    }
+  }, [accountId, mediaKey, activeSource, activeState, isDynamic])
+
+  // Called only for accepted media reports, never startup positions held by resume.
+  const observeDuration = (duration: number) => {
+    if (!activeSource || !Number.isFinite(duration) || duration <= 0 || duration > 86400) return false
+    const subtitles = activeState?.status === 'ready' ? activeState.subtitles : null
+    const release = activeState?.status === 'ready' ? activeState.subtitleContext : undefined
+    const context = { observedDuration: duration, releaseFingerprint: release?.releaseFingerprint ?? subtitles?.releaseFingerprint, subtitleId: subtitles?.id }
+    subtitleContextRef.current = { mediaKey, sourceId: activeSource.id, context }
+    writeViewingSession(accountId, mediaKey, {
+      sourceId: activeSource.id, sourceFingerprint: sourceFingerprint(activeSource), duration, subtitles, releaseFingerprint: context.releaseFingerprint,
+    })
+    const cueMismatch = subtitles?.lastCueSeconds != null && !subtitleFitsRuntime(subtitles.lastCueSeconds, duration)
+    const runtimeMismatch = release?.runtimeSeconds != null && Math.abs(release.runtimeSeconds - duration) > Math.max(5, duration * 0.02)
+    if (!context.releaseFingerprint || (!cueMismatch && !runtimeMismatch)) return false
+    const correctionKey = `${mediaKey}:${activeSource.id}:${context.releaseFingerprint}:${Math.round(duration)}`
+    if (correctedRef.current.has(correctionKey)) return false
+    correctedRef.current.add(correctionKey)
+    playerDebug('subtitle runtime mismatch; selecting again', { media: mediaKey, duration,
+      lastCue: subtitles?.lastCueSeconds, subtitleId: subtitles?.id, release: context.releaseFingerprint })
+    // Keep the confirmed position in history before replacing the frame.
+    setSourceStates((prev) => withoutSource(prev, activeSource.id))
+    setExtractionAttempt((attempt) => attempt + 1)
+    return true
+  }
 
   return {
     activeSource,
@@ -260,5 +328,7 @@ export function useSourcePlayback({ playableSources, resetKey, playbackRequested
     followProviderEpisode,
     revealIframe,
     markSourceFailed,
+    observeDuration,
+    subtitleNotice: activeState?.status === 'ready' ? activeState.subtitleNotice : null,
   }
 }

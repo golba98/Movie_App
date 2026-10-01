@@ -1,3 +1,5 @@
+import type { SubtitleContext, SubtitleSelection } from '../../src/types/media-source'
+import { subtitleFitsRuntime } from '../../src/lib/subtitle-timing'
 import type { MediaType } from '../../src/types/tmdb'
 import { notFound } from '../http'
 import { fetchTmdbRuntime } from './tmdb'
@@ -23,11 +25,7 @@ const MIN_CUES = 10
 const CHOSEN_TTL_MS = 7 * 24 * 60 * 60 * 1_000
 const MISSING_TTL_MS = 24 * 60 * 60 * 1_000
 // A lookup that failed (timeout, provider down) is retried sooner than a real miss.
-const FAILED_TTL_MS = 10 * 60 * 1_000
 
-// A file must end between 60% of the runtime and ten minutes past it.
-const MIN_RUNTIME_SHARE = 0.6
-const RUNTIME_SLACK_SECONDS = 600
 // Two copies agree when most lines they share start within 1.5 s of each other.
 // Copies of different releases of the same cut agree on 98-100% of their lines;
 // a shifted copy, a frame-rate drift or another show agrees on almost none.
@@ -58,7 +56,12 @@ interface Cue {
   text: string
 }
 
-type Choice = { url: string } | { body: string }
+interface Choice {
+  body: string
+  lastCueSeconds: number
+  provider: SubtitleSelection['provider']
+  confidence: SubtitleSelection['confidence']
+}
 
 interface ProviderMeta {
   data?: { imdb_id?: unknown; file_name?: unknown }
@@ -83,6 +86,7 @@ interface Candidate {
   encoding: string
   score: number
   downloads: number
+  exactRelease: boolean
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -108,104 +112,136 @@ export function subtitleTarget(playerUrl: string): SubtitleTarget | null {
   return season && episode ? { mediaType: 'tv', tmdbId, season, episode } : null
 }
 
-/** The player URL with a checked English subtitle attached, or unchanged when there is none. */
-export async function withSubtitle(env: Env, playerUrl: string, appOrigin: string) {
+/** Resolves a track after checking the provider's current release, even on cache hits. */
+export async function withSubtitle(env: Env, playerUrl: string, appOrigin: string, context: SubtitleContext = {}) {
   const target = subtitleTarget(playerUrl)
-  if (!target) return playerUrl
+  if (!target) return { playerUrl }
   try {
-    const id = await subtitleIdFor(env, target)
-    if (!id) return playerUrl
+    const signal = AbortSignal.timeout(LOOKUP_BUDGET_MS)
+    const meta = await providerMeta(target, signal)
+    const releaseName = typeof meta.data?.file_name === 'string' ? meta.data.file_name : ''
+    const bundled = bundledEnglishTrack(meta.default_subs)
+    // An unidentified release must not share a sticky episode-only selection.
+    const releaseFingerprint = await fingerprint(JSON.stringify([SUBTITLE_PLAYER_HOST, target, releaseName, bundled]))
+    const observed = (releaseName || bundled) && context.releaseFingerprint === releaseFingerprint ? context.observedDuration : undefined
+    const catalogMinutes = observed ? null : await fetchTmdbRuntime(env, target, signal).catch(() => null)
+    const runtime = observed ?? (catalogMinutes ? catalogMinutes * 60 : null)
+    const key = ['v2', SUBTITLE_PLAYER_HOST, target.mediaType, target.tmdbId, target.season, target.episode,
+      'en', releaseFingerprint, observed ? Math.round(observed) : 'metadata'].join(':')
+    const cached = releaseName || bundled ? await env.DB.prepare(
+      'SELECT subtitle_id, metadata FROM subtitle_selections WHERE key = ? AND expires_at > ?',
+    ).bind(key, Date.now()).first<{ subtitle_id: string | null; metadata: string | null }>() : null
+    let selection: SubtitleSelection | null = cached?.metadata ? JSON.parse(cached.metadata) : null
+    // A saved app-selected asset can survive a re-pick, but only for this current release.
+    let restored = false
+    if ((releaseName || bundled) && context.releaseFingerprint === releaseFingerprint
+      && context.subtitleId && /^[0-9a-f-]{36}$/.test(context.subtitleId)) {
+      const asset = await env.DB.prepare('SELECT metadata FROM subtitle_cache WHERE id = ? AND body IS NOT NULL')
+        .bind(context.subtitleId).first<{ metadata: string | null }>()
+      const saved: SubtitleSelection | null = asset?.metadata ? JSON.parse(asset.metadata) : null
+      if (saved?.releaseFingerprint === releaseFingerprint && saved.lastCueSeconds !== null
+        && (!runtime || (saved.provider === 'bundled' && !observed) || subtitleFitsRuntime(saved.lastCueSeconds, runtime))) {
+        selection = { ...saved, runtimeSeconds: runtime }
+        restored = true
+      }
+    }
+    if (!cached && !restored) {
+      const choice = await chooseSubtitle(target, meta, runtime, Boolean(observed), signal)
+      if (choice) {
+        // Content-addressed assets are immutable, including across cache expiry/re-picks.
+        const assetKey = `asset:${await fingerprint(`${releaseFingerprint}:${choice.body}`)}`
+        const now = Date.now()
+        const id = crypto.randomUUID()
+        const metadata: SubtitleSelection = { id, language: 'en', provider: choice.provider, releaseFingerprint,
+          lastCueSeconds: choice.lastCueSeconds, runtimeSeconds: runtime, confidence: choice.confidence }
+        const row = await env.DB.prepare(
+          `INSERT INTO subtitle_cache (key, id, body, url, expires_at, created_at, metadata)
+           VALUES (?, ?, ?, NULL, ?, ?, ?) ON CONFLICT(key) DO NOTHING`,
+        ).bind(assetKey, id, choice.body, now + CHOSEN_TTL_MS, now, JSON.stringify(metadata)).run()
+        if (!row.success) throw new Error('Subtitle asset could not be saved')
+        const asset = await env.DB.prepare('SELECT id FROM subtitle_cache WHERE key = ?').bind(assetKey).first<{ id: string }>()
+        if (!asset) throw new Error('Subtitle asset is missing')
+        selection = { id: asset.id, language: 'en', provider: choice.provider, releaseFingerprint,
+          lastCueSeconds: choice.lastCueSeconds, runtimeSeconds: runtime, confidence: choice.confidence }
+      }
+      if (releaseName || bundled) {
+        await env.DB.prepare(
+          `INSERT INTO subtitle_selections (key, subtitle_id, metadata, expires_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET subtitle_id = excluded.subtitle_id, metadata = excluded.metadata,
+           expires_at = excluded.expires_at`,
+        ).bind(key, selection?.id ?? null, selection ? JSON.stringify(selection) : null,
+          Date.now() + (selection ? CHOSEN_TTL_MS : MISSING_TTL_MS)).run()
+      }
+    }
+    const subtitleContext = { releaseFingerprint, runtimeSeconds: runtime }
+    if (!selection) return { playerUrl, subtitleContext, subtitles: null,
+      subtitleNotice: 'No compatible English track was verified. Choose subtitles in the player menu.' }
     const url = new URL(playerUrl)
-    url.searchParams.set('sub_url', `${appOrigin}/api/subtitles/${id}.vtt`)
+    url.searchParams.set('sub_url', `${appOrigin}/api/subtitles/${selection.id}.vtt`)
     url.searchParams.set('sub_label', 'English')
     url.searchParams.set('sub_lang', 'en')
-    return url.href
-  } catch (error) {
-    console.warn('Subtitle cache failed', { tmdbId: target.tmdbId, reason: error instanceof Error ? error.message : 'unknown' })
-    return playerUrl
+    return { playerUrl: url.href, subtitles: selection, subtitleContext }
+  } catch {
+    console.warn('Subtitle lookup failed', { tmdbId: target.tmdbId })
+    return { playerUrl, subtitles: null,
+      subtitleNotice: 'Subtitles could not be verified. Choose subtitles in the player menu.' }
   }
 }
 
-/**
- * Serves a chosen subtitle to the provider's frame, which fetches it
- * cross-origin and without cookies. Only subtitles chosen during an
- * authenticated extraction exist, so this never fetches anything itself.
- */
+async function fingerprint(value: string) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+/** Only stored assets can be fetched publicly; this endpoint never proxies user URLs. */
 export async function serveSubtitle(env: Env, id: string) {
-  const row = await env.DB
-    .prepare('SELECT body, url FROM subtitle_cache WHERE id = ?')
-    .bind(id)
+  const row = await env.DB.prepare('SELECT body, url FROM subtitle_cache WHERE id = ?').bind(id)
     .first<{ body: string | null; url: string | null }>()
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Cache-Control': 'public, max-age=86400',
-    'X-Content-Type-Options': 'nosniff',
-  }
+  const headers = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400',
+    'X-Content-Type-Options': 'nosniff' }
+  // Legacy players may still hold a redirect-backed asset.
   if (row?.url) return new Response(null, { status: 302, headers: { ...headers, Location: row.url } })
   if (row?.body) return new Response(row.body, { headers: { ...headers, 'Content-Type': 'text/vtt; charset=utf-8' } })
   return notFound()
 }
 
-const cacheKey = (target: SubtitleTarget) =>
-  [target.mediaType, target.tmdbId, target.season ?? '', target.episode ?? '', 'en'].join(':')
-
-// Misses are cached too, so a title without subtitles isn't searched on every play.
-async function subtitleIdFor(env: Env, target: SubtitleTarget) {
-  const key = cacheKey(target)
-  const cached = await env.DB
-    .prepare('SELECT id, body IS NOT NULL OR url IS NOT NULL AS usable FROM subtitle_cache WHERE key = ? AND expires_at > ?')
-    .bind(key, Date.now())
-    .first<{ id: string; usable: number }>()
-  if (cached) return cached.usable ? cached.id : null
-
-  let choice: Choice | null = null
-  let ttl = MISSING_TTL_MS
-  try {
-    choice = await chooseSubtitle(env, target, AbortSignal.timeout(LOOKUP_BUDGET_MS))
-    if (choice) ttl = CHOSEN_TTL_MS
-  } catch (error) {
-    console.warn('Subtitle lookup failed', { tmdbId: target.tmdbId, reason: error instanceof Error ? error.message : 'unknown' })
-    ttl = FAILED_TTL_MS
-  }
-
-  // The id survives a re-pick, so a player already holding it keeps working.
-  const now = Date.now()
-  const row = await env.DB
-    .prepare(
-      `INSERT INTO subtitle_cache (key, id, body, url, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET body = excluded.body, url = excluded.url, expires_at = excluded.expires_at
-       RETURNING id`,
-    )
-    .bind(key, crypto.randomUUID(), choice && 'body' in choice ? choice.body : null, choice && 'url' in choice ? choice.url : null, now + ttl, now)
-    .first<{ id: string }>()
-  return choice ? row?.id ?? null : null
-}
-
-/**
- * The release's own English track when it has one, as those always match it.
- * Otherwise the OpenSubtitles file whose timing the other uploads agree with,
- * among those that are for this episode and the right length.
- */
-async function chooseSubtitle(env: Env, target: SubtitleTarget, signal: AbortSignal): Promise<Choice | null> {
-  const meta = await providerMeta(target, signal)
+async function chooseSubtitle(target: SubtitleTarget, meta: ProviderMeta, runtime: number | null,
+  observed: boolean, signal: AbortSignal): Promise<Choice | null> {
   const bundled = bundledEnglishTrack(meta.default_subs)
-  if (bundled) return { url: bundled }
-
+  if (bundled) {
+    try {
+      const response = await fetch(bundled, { signal })
+      if (!response.ok || !response.body) throw new Error('Bundled subtitle unavailable')
+      const text = decode(await readCapped(response.body), 'UTF-8').trimStart()
+      const cues = parseSubRip(text)
+      const lastCueSeconds = Math.max(...cues.map((cue) => cue.end))
+      // The release's own track outranks catalog segment runtimes, but not the actual video.
+      if (cues.length >= MIN_CUES && (!observed || !runtime || subtitleFitsRuntime(lastCueSeconds, runtime))) {
+        return { body: text.startsWith('WEBVTT') ? text : toWebVtt(cues), lastCueSeconds, provider: 'bundled', confidence: 'bundled' }
+      }
+    } catch {
+      if (signal.aborted) throw new Error('Subtitle lookup timed out')
+    }
+  }
   const imdbId = typeof meta.data?.imdb_id === 'string' ? meta.data.imdb_id.match(/^tt(\d+)$/)?.[1] : undefined
   if (!imdbId) return null
-  const [results, runtimeMinutes] = await Promise.all([
-    searchOpenSubtitles(imdbId, target, signal),
-    fetchTmdbRuntime(env, target, signal).catch(() => null),
-  ])
+  const results = await searchOpenSubtitles(imdbId, target, signal)
   const releaseName = typeof meta.data?.file_name === 'string' ? meta.data.file_name : ''
-  const candidates = rankCandidates(results, target, releaseName, runtimeMinutes ? runtimeMinutes * 60 : null)
-
-  const copies = await Promise.all(candidates.slice(0, MAX_DOWNLOADS).map((candidate) => downloadCues(candidate, signal).catch(() => null)))
-  // Out of time: a failed lookup, not a title without subtitles.
+  const candidates = rankCandidates(results, target, releaseName, runtime).slice(0, MAX_DOWNLOADS)
+  const copies = await Promise.all(candidates.map(async (candidate) => {
+    const cues = await downloadCues(candidate, signal).catch(() => null)
+    if (!cues || cues.length < MIN_CUES) return null
+    const lastCueSeconds = Math.max(...cues.map((cue) => cue.end))
+    if (runtime && !subtitleFitsRuntime(lastCueSeconds, runtime)) return null
+    return { cues, candidate, lastCueSeconds }
+  }))
   if (signal.aborted) throw new Error('Subtitle lookup timed out')
-  const cues = agreedCopy(copies.filter((copy): copy is Cue[] => copy !== null && copy.length >= MIN_CUES))
-  return cues ? { body: toWebVtt(cues) } : null
+  const usable = copies.filter((copy) => copy !== null)
+  const exact = usable.find((copy) => copy.candidate.exactRelease)
+  const cues = exact?.cues ?? agreedCopy(usable.map((copy) => copy.cues))
+  const chosen = usable.find((copy) => copy.cues === cues)
+  return chosen ? { body: toWebVtt(chosen.cues), lastCueSeconds: chosen.lastCueSeconds,
+    provider: 'opensubtitles', confidence: exact ? 'exact-release' : 'heuristic' } : null
 }
 
 async function providerMeta(target: SubtitleTarget, signal: AbortSignal): Promise<ProviderMeta> {
@@ -246,6 +282,10 @@ async function searchOpenSubtitles(imdbId: string, target: SubtitleTarget, signa
   if (!response.ok) throw new Error(`OpenSubtitles search returned ${response.status}`)
   const results: unknown = await response.json()
   return Array.isArray(results) ? results.filter(isRecord) as SearchResult[] : []
+}
+
+function releaseIdentity(name: string) {
+  return (name.split('/').pop() ?? '').replace(/\.(?:srt|vtt|mkv|mp4|avi)$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
 function releaseFamily(name: string) {
@@ -292,9 +332,10 @@ function rankCandidates(results: SearchResult[], target: SubtitleTarget, release
       if (!link || result.SubFormat?.toLowerCase() !== 'srt') return []
       if (result.SubBad === '1' || result.SubAutoTranslation === '1' || result.SubForeignPartsOnly === '1') return []
       if (target.episode !== null && namesOtherEpisode(name, target)) return []
-      if (expected && lastLine !== null && (lastLine < expected * MIN_RUNTIME_SHARE || lastLine > expected + RUNTIME_SLACK_SECONDS)) return []
-      const score = (family && releaseFamily(name) === family ? 2 : 0) + (result.SubHearingImpaired === '1' ? 0 : 1)
-      return [{ link, encoding: result.SubEncoding ?? 'UTF-8', score, downloads: Number(result.SubDownloadsCnt) || 0 }]
+      if (expected && lastLine !== null && !subtitleFitsRuntime(lastLine, expected)) return []
+      const exactRelease = Boolean(releaseName) && releaseIdentity(name) === releaseIdentity(releaseName)
+      const score = (exactRelease ? 100 : 0) + (family && releaseFamily(name) === family ? 2 : 0) + (result.SubHearingImpaired === '1' ? 0 : 1)
+      return [{ link, encoding: result.SubEncoding ?? 'UTF-8', score, downloads: Number(result.SubDownloadsCnt) || 0, exactRelease }]
     })
     .sort((a, b) => b.score - a.score || b.downloads - a.downloads)
 }
@@ -344,9 +385,10 @@ async function downloadCues(candidate: Candidate, signal: AbortSignal) {
 }
 
 function clock(value: string) {
-  const match = value.trim().match(/^(\d{1,2}):(\d{2}):(\d{2})(?:[,.](\d{1,3}))?/)
+  const match = value.trim().match(/^(?:(\d{2,}):)?(\d{2}):(\d{2})(?:[,.](\d{1,3}))?(?:\s|$)/)
   if (!match) return null
-  const [, hours, minutes, seconds, fraction = '0'] = match
+  const [, hours = '0', minutes, seconds, fraction = '0'] = match
+  if (Number(minutes) >= 60 || Number(seconds) >= 60) return null
   return Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds) + Number(fraction.padEnd(3, '0')) / 1000
 }
 

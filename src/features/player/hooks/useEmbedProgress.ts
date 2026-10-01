@@ -28,7 +28,7 @@ function parseDetails(data: Record<string, unknown>) {
   if (data.player_info !== undefined && !isRecord(data.player_info)) return null
   if (isRecord(data.player_info)) {
     for (const [field, key] of [['season', 'season'], ['episode', 'episode'], ['tmdb', 'tmdbId']] as const) {
-      if (data.player_info[field] === undefined) continue
+      if (data.player_info[field] == null) continue
       const value = toNumber(data.player_info[field])
       if (value === null || !Number.isInteger(value) || value <= 0) return null
       details[key] = value
@@ -91,6 +91,8 @@ export function useEmbedProgress(
     const onMessage = (event: MessageEvent) => {
       const frameWindow = iframeRef.current?.contentWindow
       if (!frameWindow || event.source !== frameWindow) return
+      const src = iframeRef.current?.src
+      if (!src || event.origin !== new URL(src).origin) return
       // vsembed blanks its player when it detects browser DevTools.
       if (isRecord(event.data) && event.data.type === 'VS_DEVTOOLS') {
         playerDebug('provider stopped its player because DevTools are open')

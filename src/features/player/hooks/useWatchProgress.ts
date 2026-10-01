@@ -26,6 +26,9 @@ interface WatchProgressOptions {
   // The player is showing and playing this title.
   active: boolean
   iframeRef: RefObject<HTMLIFrameElement | null>
+  // Runs after restart recovery accepts the media report. A source correction
+  // requests an urgent commit before its replacement frame reads the resume point.
+  onAcceptedProgress?: (position: number, duration: number) => boolean | void
 }
 
 /**
@@ -39,7 +42,7 @@ interface WatchProgressOptions {
  * `ended` is true while the player's latest position is the title's end; a
  * player that never reports its position never ends.
  */
-export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMinutes, active, iframeRef }: WatchProgressOptions) {
+export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMinutes, active, iframeRef, onAcceptedProgress }: WatchProgressOptions) {
   const { mediaType, id } = media
   const { isEpisodeWatched, isMovieWatched, getProgress, getEntry, recordWatch } = useWatchedHistory()
 
@@ -106,6 +109,7 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
   const saveProgress = useCallback((position: number, duration: number, mode: ProgressSaveMode = 'throttled') => {
     if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0) return
     reportedRef.current = { position, duration }
+    if (onAcceptedProgress?.(position, duration)) mode = 'urgent'
     const atEnd = duration - position <= END_TOLERANCE_SECONDS
     if (atEnd !== ended) {
       if (atEnd) playerDebug('player reported the end', { position: Math.round(position), duration: Math.round(duration) })
@@ -116,7 +120,7 @@ export function useWatchProgress({ media, seasonNumber, episodeNumber, runtimeMi
     if (mode === 'throttled' && !crossedThreshold && now - lastSaveRef.current < PROGRESS_SAVE_INTERVAL_MS) return
     lastSaveRef.current = now
     commitWatch(readWatchSeconds(), mode === 'urgent')
-  }, [watched, ended, sessionKey, commitWatch, readWatchSeconds])
+  }, [watched, ended, sessionKey, commitWatch, readWatchSeconds, onAcceptedProgress])
 
   const onEmbedProgress = useRestartRecovery({ iframeRef, active, sessionKey, seasonNumber, episodeNumber, onProgress: saveProgress })
 

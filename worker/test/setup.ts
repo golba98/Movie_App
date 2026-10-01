@@ -14,6 +14,7 @@ beforeEach(async () => {
     testEnv.DB.prepare('DELETE FROM watch_rooms'),
     testEnv.DB.prepare('DELETE FROM media_sources'),
     testEnv.DB.prepare('DELETE FROM stream_resolution_cache'),
+    testEnv.DB.prepare('DELETE FROM subtitle_selections'),
     testEnv.DB.prepare('DELETE FROM subtitle_cache'),
     testEnv.DB.prepare('DELETE FROM favourites'),
     testEnv.DB.prepare('DELETE FROM watch_entries'),
