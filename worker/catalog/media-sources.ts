@@ -301,9 +301,19 @@ export async function extractStreamEndpoint(request: Request, env: Env) {
   const refresh = url.searchParams.get('refresh') === '1'
   const extractedUrl = await resolvePlayerUrl(env.DB, cleanedUrl, refresh)
   const playbackKind = extractedUrl ? classifyPlaybackKind(extractedUrl) : null
-  const [embedBlocked, playerUrl] = await Promise.all([
+  const duration = Number(url.searchParams.get('duration'))
+  const context = {
+    observedDuration: Number.isFinite(duration) && duration > 0 && duration <= 86400 ? duration : undefined,
+    releaseFingerprint: url.searchParams.get('release') ?? undefined,
+    subtitleId: url.searchParams.get('subtitle') ?? undefined,
+  }
+  const [embedBlocked, subtitles] = await Promise.all([
     extractedUrl && playbackKind === 'embed' ? probeEmbedPolicy(extractedUrl, url.origin, refresh) : null,
-    extractedUrl ? withSubtitle(env, extractedUrl, url.origin) : null,
+    extractedUrl ? withSubtitle(env, extractedUrl, url.origin, context) : null,
   ])
-  return json({ extractedUrl: playerUrl, embedBlocked, playbackKind })
+  return json({ extractedUrl: subtitles?.playerUrl ?? null, embedBlocked, playbackKind,
+    ...(subtitles && 'subtitles' in subtitles ? { subtitles: subtitles.subtitles } : {}),
+    ...(subtitles && 'subtitleNotice' in subtitles ? { subtitleNotice: subtitles.subtitleNotice } : {}),
+    ...(subtitles && 'subtitleContext' in subtitles ? { subtitleContext: subtitles.subtitleContext } : {}),
+  })
 }

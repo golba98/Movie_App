@@ -1,4 +1,4 @@
-import type { MediaSource } from '../../types/media-source'
+import type { ExtractedPlayer, MediaSource } from '../../types/media-source'
 import type { Episode, MediaType } from '../../types/tmdb'
 import type { PlaybackKind } from '../../types/watch-party'
 
@@ -15,7 +15,7 @@ export type SourceFailureReason =
 // clobbers another one's progress or error.
 type SourcePlayerState =
   | { status: 'extracting' }
-  | { status: 'ready'; sourceUrl: string; extractedUrl: string; playbackKind: PlaybackKind }
+  | { status: 'ready'; sourceUrl: string; extractedUrl: string; playbackKind: PlaybackKind; subtitles?: ExtractedPlayer['subtitles']; subtitleNotice?: string | null; subtitleContext?: ExtractedPlayer['subtitleContext'] }
   | { status: 'failed'; reason: SourceFailureReason; message: string }
 
 export type SourceStates = Record<string, SourcePlayerState>

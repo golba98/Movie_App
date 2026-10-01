@@ -13,7 +13,7 @@ describe('provider playback configuration', () => {
       const source = 'https://www.flixbaba.best/tv/387/spongebob-squarepants/season/1?e=30'
       const response = await request(`/api/media-sources/extract?url=${encodeURIComponent(source)}`, { cookie: viewer })
       expect(response.status).toBe(200)
-      expect(await response.json()).toEqual({ data: {
+      expect(await response.json()).toMatchObject({ data: {
         extractedUrl: 'https://vsembed.ru/embed/tv?tmdb=387&season=1&episode=30',
         embedBlocked: null,
         playbackKind: 'embed',

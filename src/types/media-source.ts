@@ -27,6 +27,26 @@ export interface ExtractedPlayer {
   extractedUrl: string | null
   embedBlocked?: EmbedBlockReason | null
   playbackKind?: PlaybackKind | null
+  subtitles?: SubtitleSelection | null
+  subtitleNotice?: string | null
+  subtitleContext?: { releaseFingerprint: string; runtimeSeconds: number | null }
+}
+
+/** App-selected track, bound to a provider release rather than just an episode. */
+export interface SubtitleSelection {
+  id: string
+  language: string
+  provider: 'bundled' | 'opensubtitles'
+  releaseFingerprint: string
+  lastCueSeconds: number | null
+  runtimeSeconds: number | null
+  confidence: 'bundled' | 'exact-release' | 'heuristic'
+}
+
+export interface SubtitleContext {
+  observedDuration?: number
+  releaseFingerprint?: string
+  subtitleId?: string
 }
 
 export interface AdminMediaSource extends MediaSource {

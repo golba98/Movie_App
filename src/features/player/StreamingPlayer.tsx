@@ -3,10 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MediaSource } from '../../types/media-source'
 import type { MediaItem, MediaType } from '../../types/tmdb'
 import type { EpisodeRef } from '../../types/watch-history'
+import { useAuth } from '../auth/auth-context'
 import { useWatchedHistory } from '../watch-history/watch-history-context'
 import { nextEpisode, withStartTime } from './episodes'
 import { useEpisodeSelection } from './hooks/useEpisodeSelection'
 import { useEmbedProgress, type EmbedProgress } from './hooks/useEmbedProgress'
+import { useEmbedResume } from './hooks/useEmbedResume'
 import { useSourcePlayback } from './hooks/useSourcePlayback'
 import { useTheaterFullscreen } from './hooks/useTheaterFullscreen'
 import { useTheaterMode } from './hooks/useTheaterMode'
@@ -49,6 +51,7 @@ export function StreamingPlayer({
   onTheaterModeChange,
   onCurrentEpisodeChange,
 }: StreamingPlayerProps) {
+  const { account } = useAuth()
   const isTv = mediaType === 'tv'
   const { isEpisodeWatched, toggleEpisodeWatched } = useWatchedHistory()
   const selection = useEpisodeSelection(id, mediaType, sources, numberOfSeasons)
@@ -63,14 +66,14 @@ export function StreamingPlayer({
   const exitButtonRef = useRef<HTMLButtonElement>(null)
 
   const playbackRequested = theaterMode || inlinePlaybackRequested
-  const episodeKey = `${mediaType}:${id}:${season}:${episode}`
+  const episodeKey = isTv ? `tv:${id}:${season}:${episode}` : `movie:${id}`
   // A provider can change episodes without requesting a new iframe.
   const resetKey = `${mediaType}:${id}:${selection.requestVersion}`
   const playableSources = useMemo(
     () => playableSourcesFor(sources, mediaType, season, episode),
     [sources, mediaType, season, episode],
   )
-  const playback = useSourcePlayback({ playableSources, resetKey, playbackRequested })
+  const playback = useSourcePlayback({ playableSources, resetKey, playbackRequested, accountId: account?.id ?? null, mediaKey: episodeKey })
   const { activeSource, activeState, isDynamic, iframeKey, iframeLoaded } = playback
   const playsNative = !isDynamic || (playbackRequested && activeState?.status === 'ready' && playback.playbackKind !== 'embed')
 
@@ -104,8 +107,14 @@ export function StreamingPlayer({
     runtimeMinutes,
     active: playsNative ? videoPlaying : playbackRequested && iframeLoaded,
     iframeRef,
+    onAcceptedProgress: (_position, duration) => playback.observeDuration(duration),
   })
-  const { onEmbedProgress } = progress
+  const resume = useEmbedResume({
+    iframeRef, frameKey: playbackRequested ? iframeKey : null, mediaKey: episodeKey,
+    resumePosition: progress.resumePosition,
+    onProgress: progress.onEmbedProgress,
+  })
+  const onEmbedProgress = resume.onProgress
 
   const pendingProviderProgressRef = useRef<{
     report: EmbedProgress
@@ -235,6 +244,14 @@ export function StreamingPlayer({
 
           {playback.fallbackNotice && (
             <p role="status" className="mb-3 text-sm text-zinc-300">{playback.fallbackNotice}</p>
+          )}
+
+          {playback.subtitleNotice && <p role="status" className="mb-3 text-sm text-zinc-300">{playback.subtitleNotice}</p>}
+          {resume.resumeFailed && (
+            <p role="alert" className="mb-3 text-sm text-zinc-300">
+              Resume could not be confirmed. Your saved position is safe.{' '}
+              <button type="button" className="underline" onClick={reloadPlayer}>Retry resume</button>
+            </p>
           )}
 
           {/* Promoted to full-viewport with CSS rather than reparented — moving the

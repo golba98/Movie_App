@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers'
 import { SELF } from 'cloudflare:test'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { subtitleTarget } from '../catalog/subtitles'
@@ -89,6 +90,12 @@ async function extract(cookie: string, page = EPISODE_PAGE) {
   return (await response.json() as { data: { extractedUrl: string } }).data.extractedUrl
 }
 
+async function resolve(cookie: string, context = '') {
+  const response = await request(`/api/media-sources/extract?url=${encodeURIComponent(EPISODE_PAGE)}${context}`, { cookie })
+  expect(response.status).toBe(200)
+  return (await response.json() as { data: import('../../src/types/media-source').ExtractedPlayer }).data
+}
+
 /** The subtitle URL handed to Source 1, checked to carry the English label. */
 function subtitleUrlOf(playerUrl: string) {
   const url = new URL(playerUrl)
@@ -113,6 +120,7 @@ describe('Source 1 subtitles', () => {
   it("hands Source 1 the release's own plain English track when it has one", async () => {
     const { viewer } = await activeViewerCookies()
     const calls = stubUpstream({
+      [BUNDLED]: () => new Response(srt()),
       [EPISODE_META]: meta(WEB_DL_RELEASE, [
         { lang: 'English-Forced', code: 'en', url: `${BUNDLED}/English-Forced.eng.srt` },
         { lang: 'English-SDH', code: 'en', url: `${BUNDLED}/English-SDH.eng.srt` },
@@ -124,14 +132,16 @@ describe('Source 1 subtitles', () => {
     const playerUrl = await extract(viewer)
     expect(playerUrl.startsWith(`${EPISODE_PLAYER}&sub_url=`)).toBe(true)
     const response = await fetchSubtitle(subtitleUrlOf(playerUrl))
-    expect(response.status).toBe(302)
-    expect(response.headers.get('location')).toBe(`${BUNDLED}/English.eng.srt`)
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('00:02:14.000 --> 00:02:16.000')
+    expect(calls).toContain(`${BUNDLED}/English.eng.srt`)
     expect(calls.some((url) => url.startsWith('https://rest.opensubtitles.org/'))).toBe(false)
   })
 
   it('falls back to the SDH track, never a forced one', async () => {
     const { viewer } = await activeViewerCookies()
-    stubUpstream({
+    const calls = stubUpstream({
+      [BUNDLED]: () => new Response(srt()),
       [EPISODE_META]: meta(WEB_DL_RELEASE, [
         { lang: 'English-Forced', code: 'en', url: `${BUNDLED}/English-Forced.eng.srt` },
         { lang: 'English-SDH', code: 'en', url: `${BUNDLED}/English-SDH.eng.srt` },
@@ -139,7 +149,23 @@ describe('Source 1 subtitles', () => {
     })
 
     const response = await fetchSubtitle(subtitleUrlOf(await extract(viewer)))
-    expect(response.headers.get('location')).toBe(`${BUNDLED}/English-SDH.eng.srt`)
+    expect(response.status).toBe(200)
+    expect(calls).toContain(`${BUNDLED}/English-SDH.eng.srt`)
+    expect(calls).not.toContain(`${BUNDLED}/English-Forced.eng.srt`)
+  })
+
+  it('preserves bundled WebVTT settings and parses timestamps without an hour field', async () => {
+    const { viewer } = await activeViewerCookies()
+    const body = `WEBVTT\n\nSTYLE\n::cue { color: yellow; }\n\n${Array.from({ length: 10 }, (_, i) =>
+      `0${i}:00.000 --> 0${i}:05.000 align:start\nDialogue ${i}`).join('\n\n')}\n`
+    stubUpstream({
+      [EPISODE_META]: meta(WEB_DL_RELEASE, [{ lang: 'English', code: 'en', url: `${BUNDLED}/English.vtt` }]),
+      [EPISODE_RUNTIME]: () => Response.json({ runtime: 11 }),
+      [BUNDLED]: () => new Response(body),
+    })
+    const result = await resolve(viewer)
+    expect(result.subtitles?.lastCueSeconds).toBe(545)
+    expect(await (await fetchSubtitle(subtitleUrlOf(result.extractedUrl!))).text()).toBe(body)
   })
 
   it('rejects a wrong-show file and an out-of-sync copy, and picks the timing the other releases agree on', async () => {
@@ -242,6 +268,107 @@ describe('Source 1 subtitles', () => {
   it('serves only subtitles it chose', async () => {
     const response = await request('/api/subtitles/00000000-0000-4000-8000-000000000000.vtt')
     expect(response.status).toBe(404)
+  })
+
+  it('rechecks release metadata on cache hits and isolates a changed release', async () => {
+    const { viewer } = await activeViewerCookies()
+    let release = WEB_DL_RELEASE
+    let body = srt()
+    const calls = stubUpstream({
+      [EPISODE_META]: () => meta(release, [{ lang: 'English', code: 'en', url: `${BUNDLED}/English.srt` }])(),
+      [EPISODE_RUNTIME]: () => Response.json({ runtime: 58 }),
+      [BUNDLED]: () => new Response(body),
+    })
+    const first = await resolve(viewer)
+    expect((await resolve(viewer)).subtitles?.id).toBe(first.subtitles?.id)
+    release = 'A different video release.mkv'
+    body = srt(20)
+    const second = await resolve(viewer)
+    expect(second.subtitles?.releaseFingerprint).not.toBe(first.subtitles?.releaseFingerprint)
+    expect(second.subtitles?.id).not.toBe(first.subtitles?.id)
+    expect(await (await fetchSubtitle(subtitleUrlOf(first.extractedUrl!))).text()).toContain('00:02:14.000')
+    const restored = await resolve(viewer,
+      `&subtitle=${first.subtitles!.id}&release=${first.subtitles!.releaseFingerprint}`)
+    expect(restored.subtitles?.id).toBe(second.subtitles?.id)
+    expect(await (await fetchSubtitle(subtitleUrlOf(second.extractedUrl!))).text()).toContain('00:02:34.000')
+    expect(calls.filter((url) => url === EPISODE_META)).toHaveLength(4)
+  })
+
+  it('never replaces the contents of an asset when a selection expires', async () => {
+    const { viewer } = await activeViewerCookies()
+    let body = srt()
+    stubUpstream({
+      [EPISODE_META]: meta(WEB_DL_RELEASE, [{ lang: 'English', code: 'en', url: `${BUNDLED}/English.srt` }]),
+      [EPISODE_RUNTIME]: () => Response.json({ runtime: 58 }),
+      [BUNDLED]: () => new Response(body),
+    })
+    const first = await resolve(viewer)
+    await env.DB.prepare('UPDATE subtitle_selections SET expires_at = 0').run()
+    body = srt(30)
+    const second = await resolve(viewer)
+    expect(second.subtitles?.id).not.toBe(first.subtitles?.id)
+    expect(await (await fetchSubtitle(subtitleUrlOf(first.extractedUrl!))).text()).toContain('00:02:14.000')
+    const restored = await resolve(viewer,
+      `&subtitle=${first.subtitles!.id}&release=${first.subtitles!.releaseFingerprint}`)
+    expect(restored.subtitles?.id).toBe(first.subtitles?.id)
+  })
+
+  it('uses the observed video runtime instead of a catalog segment runtime', async () => {
+    const { viewer } = await activeViewerCookies()
+    const short = LINES.map((text, i) => `${i + 1}\n${timestamp(10 + i * 15)} --> ${timestamp(12 + i * 15)}\n${text}`).join('\n\n')
+    const combined = LINES.map((text, i) => `${i + 1}\n${timestamp(10 + i * 36)} --> ${timestamp(12 + i * 36)}\n${text}`).join('\n\n')
+    stubUpstream({
+      [EPISODE_META]: meta(WEB_DL_RELEASE),
+      [EPISODE_RUNTIME]: () => Response.json({ runtime: 11 }),
+      [EPISODE_SEARCH]: () => Response.json([
+        searchResult(501, 'Show.S01E01.WEB-DL.srt', { SubLastTS: '00:10:00' }),
+        searchResult(502, 'Show.S01E01.Combined.WEB-DL.srt', { SubLastTS: '00:23:36' }),
+      ]),
+      [`${DOWNLOAD}/501.gz`]: download(short),
+      [`${DOWNLOAD}/502.gz`]: download(combined),
+    })
+    const first = await resolve(viewer)
+    expect(first.subtitles?.lastCueSeconds).toBe(597)
+    const second = await resolve(viewer, `&duration=1473&release=${first.subtitleContext!.releaseFingerprint}`)
+    expect(second.subtitles?.lastCueSeconds).toBe(1416)
+    expect(second.subtitles?.runtimeSeconds).toBe(1473)
+    const incompatible = await resolve(viewer,
+      `&duration=1473&release=${first.subtitleContext!.releaseFingerprint}&subtitle=${first.subtitles!.id}`)
+    expect(incompatible.subtitles?.id).toBe(second.subtitles?.id)
+    expect(await (await fetchSubtitle(subtitleUrlOf(second.extractedUrl!))).text()).toContain('00:00:10.000')
+    // An unrelated release cannot lend its runtime to this video.
+    const stale = await resolve(viewer, `&duration=1473&release=${'f'.repeat(64)}`)
+    expect(stale.subtitles?.lastCueSeconds).toBe(597)
+  })
+
+  it('rejects a downloaded file whose cues disagree with its advertised runtime', async () => {
+    const { viewer } = await activeViewerCookies()
+    stubUpstream({
+      [EPISODE_META]: meta(WEB_DL_RELEASE),
+      [EPISODE_RUNTIME]: () => Response.json({ runtime: 11 }),
+      [EPISODE_SEARCH]: () => Response.json([searchResult(601, 'Show.S01E01.srt', { SubLastTS: '00:10:00' })]),
+      [`${DOWNLOAD}/601.gz`]: download(srt()),
+    })
+    expect((await resolve(viewer)).subtitles).toBeNull()
+  })
+
+  it('prefers an exact release match over a majority of differently timed uploads', async () => {
+    const { viewer } = await activeViewerCookies()
+    stubUpstream({
+      [EPISODE_META]: meta(WEB_DL_RELEASE),
+      [EPISODE_RUNTIME]: () => Response.json({ runtime: 58 }),
+      [EPISODE_SEARCH]: () => Response.json([
+        searchResult(701, WEB_DL_RELEASE.split('/').pop()!.replace('.mkv', '.srt')),
+        searchResult(702, 'Other.S01E01.BluRay.srt'),
+        searchResult(703, 'Other.S01E01.HDTV.srt'),
+      ]),
+      [`${DOWNLOAD}/701.gz`]: download(srt(10)),
+      [`${DOWNLOAD}/702.gz`]: download(srt()),
+      [`${DOWNLOAD}/703.gz`]: download(srt()),
+    })
+    const result = await resolve(viewer)
+    expect(result.subtitles?.confidence).toBe('exact-release')
+    expect(await (await fetchSubtitle(subtitleUrlOf(result.extractedUrl!))).text()).toContain('00:02:24.000')
   })
 
   it('handles only Source 1 players', () => {
